@@ -6,290 +6,290 @@ blueprint:
   domain: automation
   source_url: https://raw.githubusercontent.com/lucabio-cmyk/AutomazioneBluluci/main/blueprints/automation/automazione_bluluci/pir_lux_day_night.yaml
 
-input:
-  presence_sensor:
-    name: Sensore presenza (PIR)
-    description: Binary sensor che indica movimento/presenza (on/off).
-    selector:
-      entity:
-        domain: binary_sensor
-
-  lux_sensor:
-    name: Sensore luminosità (lux)
-    description: Sensore lux usato SOLO in fase di accensione.
-    selector:
-      entity:
-        domain: sensor
-
-  light_target:
-    name: Luci target
-    description: Una o più luci da controllare.
-    selector:
-      target:
+  input:
+    presence_sensor:
+      name: Sensore presenza (PIR)
+      description: Binary sensor che indica movimento/presenza (on/off).
+      selector:
         entity:
-          domain: light
+          domain: binary_sensor
 
-  automation_enabled:
-    name: Automazione abilitata
-    description: Disabilita rapidamente la logica senza rimuovere l'automazione.
-    default: true
-    selector:
-      boolean: {}
+    lux_sensor:
+      name: Sensore luminosità (lux)
+      description: Sensore lux usato SOLO in fase di accensione.
+      selector:
+        entity:
+          domain: sensor
 
-  manual_override_helper:
-    name: Helper override manuale (opzionale)
-    description: >-
-      Se selezionato e impostato su ON, sospende la logica automatica.
-      Utile per blocco temporaneo dopo comando manuale.
-    default: ""
-    selector:
-      entity:
-        domain: input_boolean
+    light_target:
+      name: Luci target
+      description: Una o più luci da controllare.
+      selector:
+        target:
+          entity:
+            domain: light
 
-  keep_auto_off_during_override:
-    name: Mantieni spegnimento auto durante override
-    description: >-
-      Se attivo, durante override l'automazione NON accende ma può ancora spegnere
-      su assenza.
-    default: true
-    selector:
-      boolean: {}
+    automation_enabled:
+      name: Automazione abilitata
+      description: Disabilita rapidamente la logica senza rimuovere l'automazione.
+      default: true
+      selector:
+        boolean: {}
 
-  skip_if_light_already_on:
-    name: Salta accensione se luce già ON
-    description: Evita chiamate inutili quando almeno una luce target è già accesa.
-    default: true
-    selector:
-      boolean: {}
+    manual_override_helper:
+      name: Helper override manuale (opzionale)
+      description: >-
+        Se selezionato e impostato su ON, sospende la logica automatica.
+        Utile per blocco temporaneo dopo comando manuale.
+      default: ""
+      selector:
+        entity:
+          domain: input_boolean
 
-  enable_night_mode:
-    name: Abilita profilo notte
-    description: Se disattivato viene sempre usato il profilo giorno.
-    default: true
-    selector:
-      boolean: {}
+    keep_auto_off_during_override:
+      name: Mantieni spegnimento auto durante override
+      description: >-
+        Se attivo, durante override l'automazione NON accende ma può ancora spegnere
+        su assenza.
+      default: true
+      selector:
+        boolean: {}
 
-  night_detection_mode:
-    name: Rilevamento notte
-    description: Scegli se usare fascia oraria o posizione sole.
-    default: time_based
-    selector:
-      select:
-        options:
-          - label: Basato su orario
-            value: time_based
-          - label: Basato su sole
-            value: sun_based
+    skip_if_light_already_on:
+      name: Salta accensione se luce già ON
+      description: Evita chiamate inutili quando almeno una luce target è già accesa.
+      default: true
+      selector:
+        boolean: {}
 
-  night_start_time:
-    name: Inizio notte (modalità oraria)
-    description: Usato solo se night_detection_mode = time_based.
-    default: "22:30:00"
-    selector:
-      time: {}
+    enable_night_mode:
+      name: Abilita profilo notte
+      description: Se disattivato viene sempre usato il profilo giorno.
+      default: true
+      selector:
+        boolean: {}
 
-  night_end_time:
-    name: Fine notte (modalità oraria)
-    description: Usato solo se night_detection_mode = time_based.
-    default: "06:30:00"
-    selector:
-      time: {}
+    night_detection_mode:
+      name: Rilevamento notte
+      description: Scegli se usare fascia oraria o posizione sole.
+      default: time_based
+      selector:
+        select:
+          options:
+            - label: Basato su orario
+              value: time_based
+            - label: Basato su sole
+              value: sun_based
 
-  sunset_offset_minutes:
-    name: Offset tramonto minuti (modalità sole)
-    description: Valori negativi anticipano la notte, positivi la ritardano.
-    default: 0
-    selector:
-      number:
-        min: -180
-        max: 180
-        step: 1
-        mode: box
-        unit_of_measurement: min
+    night_start_time:
+      name: Inizio notte (modalità oraria)
+      description: Usato solo se night_detection_mode = time_based.
+      default: "22:30:00"
+      selector:
+        time: {}
 
-  sunrise_offset_minutes:
-    name: Offset alba minuti (modalità sole)
-    description: Valori negativi anticipano fine notte, positivi la estendono.
-    default: 0
-    selector:
-      number:
-        min: -180
-        max: 180
-        step: 1
-        mode: box
-        unit_of_measurement: min
+    night_end_time:
+      name: Fine notte (modalità oraria)
+      description: Usato solo se night_detection_mode = time_based.
+      default: "06:30:00"
+      selector:
+        time: {}
 
-  enable_lux_check:
-    name: Abilita controllo lux in accensione
-    default: true
-    selector:
-      boolean: {}
+    sunset_offset_minutes:
+      name: Offset tramonto minuti (modalità sole)
+      description: Valori negativi anticipano la notte, positivi la ritardano.
+      default: 0
+      selector:
+        number:
+          min: -180
+          max: 180
+          step: 1
+          mode: box
+          unit_of_measurement: min
 
-  lux_fallback_value:
-    name: Lux fallback (sensore unknown/unavailable)
-    description: Valore usato quando il sensore lux non è valido.
-    default: 999
-    selector:
-      number:
-        min: 0
-        max: 5000
-        step: 1
-        mode: box
-        unit_of_measurement: lx
+    sunrise_offset_minutes:
+      name: Offset alba minuti (modalità sole)
+      description: Valori negativi anticipano fine notte, positivi la estendono.
+      default: 0
+      selector:
+        number:
+          min: -180
+          max: 180
+          step: 1
+          mode: box
+          unit_of_measurement: min
 
-  day_lux_threshold:
-    name: Soglia lux giorno
-    default: 120
-    selector:
-      number:
-        min: 0
-        max: 5000
-        step: 1
-        mode: slider
-        unit_of_measurement: lx
+    enable_lux_check:
+      name: Abilita controllo lux in accensione
+      default: true
+      selector:
+        boolean: {}
 
-  day_brightness_pct:
-    name: Luminosità giorno (%)
-    default: 85
-    selector:
-      number:
-        min: 1
-        max: 100
-        step: 1
-        mode: slider
-        unit_of_measurement: "%"
+    lux_fallback_value:
+      name: Lux fallback (sensore unknown/unavailable)
+      description: Valore usato quando il sensore lux non è valido.
+      default: 999
+      selector:
+        number:
+          min: 0
+          max: 5000
+          step: 1
+          mode: box
+          unit_of_measurement: lx
 
-  day_transition_seconds:
-    name: Transizione giorno (s)
-    default: 1
-    selector:
-      number:
-        min: 0
-        max: 30
-        step: 1
-        mode: slider
-        unit_of_measurement: s
+    day_lux_threshold:
+      name: Soglia lux giorno
+      default: 120
+      selector:
+        number:
+          min: 0
+          max: 5000
+          step: 1
+          mode: slider
+          unit_of_measurement: lx
 
-  day_no_motion_timeout_seconds:
-    name: Timeout assenza giorno (s)
-    default: 180
-    selector:
-      number:
-        min: 5
-        max: 7200
-        step: 1
-        mode: box
-        unit_of_measurement: s
+    day_brightness_pct:
+      name: Luminosità giorno (%)
+      default: 85
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          mode: slider
+          unit_of_measurement: "%"
 
-  night_lux_threshold:
-    name: Soglia lux notte
-    default: 20
-    selector:
-      number:
-        min: 0
-        max: 5000
-        step: 1
-        mode: slider
-        unit_of_measurement: lx
+    day_transition_seconds:
+      name: Transizione giorno (s)
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 1
+          mode: slider
+          unit_of_measurement: s
 
-  night_brightness_pct:
-    name: Luminosità notte (%)
-    default: 25
-    selector:
-      number:
-        min: 1
-        max: 100
-        step: 1
-        mode: slider
-        unit_of_measurement: "%"
+    day_no_motion_timeout_seconds:
+      name: Timeout assenza giorno (s)
+      default: 180
+      selector:
+        number:
+          min: 5
+          max: 7200
+          step: 1
+          mode: box
+          unit_of_measurement: s
 
-  night_transition_seconds:
-    name: Transizione notte (s)
-    default: 1
-    selector:
-      number:
-        min: 0
-        max: 30
-        step: 1
-        mode: slider
-        unit_of_measurement: s
+    night_lux_threshold:
+      name: Soglia lux notte
+      default: 20
+      selector:
+        number:
+          min: 0
+          max: 5000
+          step: 1
+          mode: slider
+          unit_of_measurement: lx
 
-  night_no_motion_timeout_seconds:
-    name: Timeout assenza notte (s)
-    default: 90
-    selector:
-      number:
-        min: 5
-        max: 7200
-        step: 1
-        mode: box
-        unit_of_measurement: s
+    night_brightness_pct:
+      name: Luminosità notte (%)
+      default: 25
+      selector:
+        number:
+          min: 1
+          max: 100
+          step: 1
+          mode: slider
+          unit_of_measurement: "%"
 
-  motion_on_debounce_seconds:
-    name: Debounce movimento ON (s)
-    description: Il movimento deve restare ON per questo tempo prima del trigger.
-    default: 0
-    selector:
-      number:
-        min: 0
-        max: 30
-        step: 1
-        mode: slider
-        unit_of_measurement: s
+    night_transition_seconds:
+      name: Transizione notte (s)
+      default: 1
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 1
+          mode: slider
+          unit_of_measurement: s
 
-  motion_off_debounce_seconds:
-    name: Debounce assenza OFF (s)
-    description: L'assenza deve restare OFF per questo tempo prima del trigger.
-    default: 0
-    selector:
-      number:
-        min: 0
-        max: 30
-        step: 1
-        mode: slider
-        unit_of_measurement: s
+    night_no_motion_timeout_seconds:
+      name: Timeout assenza notte (s)
+      default: 90
+      selector:
+        number:
+          min: 5
+          max: 7200
+          step: 1
+          mode: box
+          unit_of_measurement: s
 
-  min_time_between_runs_seconds:
-    name: Tempo minimo tra nuove accensioni (s)
-    description: Antirimbalzo logico per evitare comandi ON troppo ravvicinati.
-    default: 2
-    selector:
-      number:
-        min: 0
-        max: 300
-        step: 1
-        mode: box
-        unit_of_measurement: s
+    motion_on_debounce_seconds:
+      name: Debounce movimento ON (s)
+      description: Il movimento deve restare ON per questo tempo prima del trigger.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 1
+          mode: slider
+          unit_of_measurement: s
 
-  brightness_mode:
-    name: Modalità controllo luci
-    description: >-
-      brightness_control: usa brightness + transition.
-      scene_control: attiva scene giorno/notte (se configurate).
-    default: brightness_control
-    selector:
-      select:
-        options:
-          - label: Controllo luminosità
-            value: brightness_control
-          - label: Controllo scene
-            value: scene_control
+    motion_off_debounce_seconds:
+      name: Debounce assenza OFF (s)
+      description: L'assenza deve restare OFF per questo tempo prima del trigger.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 1
+          mode: slider
+          unit_of_measurement: s
 
-  day_scene:
-    name: Scena giorno (opzionale)
-    description: Usata solo con brightness_mode = scene_control.
-    default: ""
-    selector:
-      entity:
-        domain: scene
+    min_time_between_runs_seconds:
+      name: Tempo minimo tra nuove accensioni (s)
+      description: Antirimbalzo logico per evitare comandi ON troppo ravvicinati.
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 300
+          step: 1
+          mode: box
+          unit_of_measurement: s
 
-  night_scene:
-    name: Scena notte (opzionale)
-    description: Usata solo con brightness_mode = scene_control.
-    default: ""
-    selector:
-      entity:
-        domain: scene
+    brightness_mode:
+      name: Modalità controllo luci
+      description: >-
+        brightness_control: usa brightness + transition.
+        scene_control: attiva scene giorno/notte (se configurate).
+      default: brightness_control
+      selector:
+        select:
+          options:
+            - label: Controllo luminosità
+              value: brightness_control
+            - label: Controllo scene
+              value: scene_control
+
+    day_scene:
+      name: Scena giorno (opzionale)
+      description: Usata solo con brightness_mode = scene_control.
+      default: ""
+      selector:
+        entity:
+          domain: scene
+
+    night_scene:
+      name: Scena notte (opzionale)
+      description: Usata solo con brightness_mode = scene_control.
+      default: ""
+      selector:
+        entity:
+          domain: scene
 
 mode: restart
 max_exceeded: silent
