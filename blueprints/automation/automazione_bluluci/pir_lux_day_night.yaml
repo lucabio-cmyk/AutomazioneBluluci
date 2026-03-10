@@ -64,6 +64,18 @@ blueprint:
         entity:
           domain: sensor
 
+    twilight_sensor:
+      name: Sensore crepuscolare esterno (opzionale, per rilevamento notte)
+      description: >-
+        Sensore lux dedicato al solo rilevamento notte in modalità lux_based.
+        Se valorizzato, il profilo notte viene deciso da questo sensore (consigliato se
+        vuoi separare il sensore usato per accensione da quello esterno crepuscolare).
+        Se lasciato vuoto, viene usato il sensore luminosità principale.
+      default: ""
+      selector:
+        entity:
+          domain: sensor
+
     light_target:
       name: Luci target
       description: Una o più luci da controllare.
@@ -119,6 +131,8 @@ blueprint:
         - Orario: fascia oraria fissa (es. 22:30 – 06:30).
         - Sole: tramonto/alba con offset opzionali.
         - Lux esterno (crepuscolare): usa direttamente il valore del sensore lux.
+          Se selezionato, usa prima il "Sensore crepuscolare esterno" (se impostato),
+          altrimenti il sensore lux principale.
           Se lux < soglia lux notte → profilo notte. Ideale con sensori crepuscolari esterni:
           il sistema si adatta automaticamente a nuvole, stagioni e condizioni meteo reali.
       default: time_based
@@ -527,6 +541,8 @@ variables:
   mmwave_keep_on_timeout_seconds: !input mmwave_keep_on_timeout_seconds
   has_mmwave: "{{ mmwave_sensor | string | length > 0 }}"
   lux_sensor: !input lux_sensor
+  twilight_sensor: !input twilight_sensor
+  has_twilight_sensor: "{{ twilight_sensor | string | length > 0 }}"
   light_target: !input light_target
 
   automation_enabled: !input automation_enabled
@@ -583,6 +599,23 @@ variables:
       {{ lux_fallback_value | float }}
     {% endif %}
 
+  # Parsing lux sensore crepuscolare esterno (opzionale, usato per decidere la notte)
+  twilight_lux_raw: >-
+    {% if has_twilight_sensor %}
+      {{ states(twilight_sensor) }}
+    {% else %}
+      {{ current_lux_raw }}
+    {% endif %}
+  valid_twilight_lux: >-
+    {{ twilight_lux_raw not in ['unknown', 'unavailable', 'none', 'None', '']
+       and (twilight_lux_raw | float(none)) is not none }}
+  twilight_lux: >-
+    {% if valid_twilight_lux %}
+      {{ twilight_lux_raw | float }}
+    {% else %}
+      {{ lux_fallback_value | float }}
+    {% endif %}
+
   # Rilevamento notte: time_based, sun_based, o lux_based (sensore crepuscolare esterno).
   # Modalità lux_based: ideale con sensore crepuscolare esterno. Il profilo notte si attiva
   # automaticamente quando il lux esterno scende sotto lux_night_detection_threshold,
@@ -600,7 +633,7 @@ variables:
           {%- set ns.v = now() >= start or now() < stop -%}
         {%- endif -%}
       {%- elif night_detection_mode == 'lux_based' -%}
-        {%- set lux_val = current_lux | float(lux_fallback_value | float(999)) -%}
+        {%- set lux_val = twilight_lux | float(lux_fallback_value | float(999)) -%}
         {%- set ns.v = lux_val < (lux_night_detection_threshold | float(50)) -%}
       {%- else -%}
         {%- set now_ts = as_timestamp(now()) -%}
