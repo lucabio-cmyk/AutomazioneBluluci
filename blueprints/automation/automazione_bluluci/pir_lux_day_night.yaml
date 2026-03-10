@@ -4,7 +4,7 @@ blueprint:
     Blueprint professionale per accensione/spegnimento luci basato su presenza PIR e luminosità,
     con profili giorno/notte, override manuale, debounce, fallback sensori e supporto multi-luce.
   domain: automation
-  source_url: https://raw.githubusercontent.com/YOUR_GITHUB_USER/AutomazioneBluluci/main/blueprints/automation/automazione_bluluci/pir_lux_day_night.yaml
+  source_url: https://raw.githubusercontent.com/lucabio-cmyk/AutomazioneBluluci/main/blueprints/automation/automazione_bluluci/pir_lux_day_night.yaml
 
 input:
   presence_sensor:
