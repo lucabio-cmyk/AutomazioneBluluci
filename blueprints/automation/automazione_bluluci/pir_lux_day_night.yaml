@@ -5,6 +5,8 @@ blueprint:
     con profili giorno/notte, override manuale, debounce, fallback sensori e supporto multi-luce.
     Supporto opzionale sensore mmWave (radar) per mantenere la luce accesa quando viene rilevata
     presenza stazionaria anche dopo che il PIR non rileva più movimento.
+    Novità: rilevamento notte tramite sensore lux esterno (crepuscolare), trigger automatico al calo
+    di lux con presenza rilevata, dissolvenza pre-spegnimento e transizione morbida allo spegnimento.
   domain: automation
   source_url: https://raw.githubusercontent.com/lucabio-cmyk/AutomazioneBluluci/main/blueprints/automation/automazione_bluluci/pir_lux_day_night.yaml
 
@@ -55,7 +57,9 @@ blueprint:
 
     lux_sensor:
       name: Sensore luminosità (lux)
-      description: Sensore lux usato SOLO in fase di accensione.
+      description: >-
+        Sensore lux usato per il controllo accensione e, in modalità lux_based, per il
+        rilevamento notte. Ideale un sensore crepuscolare esterno (es. lux esterno).
       selector:
         entity:
           domain: sensor
@@ -110,7 +114,13 @@ blueprint:
 
     night_detection_mode:
       name: Rilevamento notte
-      description: Scegli se usare fascia oraria o posizione sole.
+      description: >-
+        Scegli come determinare se è notte:
+        - Orario: fascia oraria fissa (es. 22:30 – 06:30).
+        - Sole: tramonto/alba con offset opzionali.
+        - Lux esterno (crepuscolare): usa direttamente il valore del sensore lux.
+          Se lux < soglia lux notte → profilo notte. Ideale con sensori crepuscolari esterni:
+          il sistema si adatta automaticamente a nuvole, stagioni e condizioni meteo reali.
       default: time_based
       selector:
         select:
@@ -119,6 +129,8 @@ blueprint:
               value: time_based
             - label: Basato su sole
               value: sun_based
+            - label: Basato su lux esterno (crepuscolare)
+              value: lux_based
 
     night_start_time:
       name: Inizio notte (modalità oraria)
@@ -158,6 +170,24 @@ blueprint:
           mode: box
           unit_of_measurement: min
 
+    lux_night_detection_threshold:
+      name: Soglia lux per profilo notte (modalità lux esterno)
+      description: >-
+        Usato solo se night_detection_mode = lux_based.
+        Se il sensore lux esterno legge SOTTO questa soglia → profilo notte attivo
+        (luminosità ridotta, temperatura colore calda, timeout più breve).
+        Impostare in base al sensore: es. 30-80 lx per crepuscolo/imbrunire.
+        NOTA: questa soglia è indipendente da "Soglia lux giorno/notte" che controlla
+        SE le luci si accendono; questa controlla QUALE profilo viene usato.
+      default: 50
+      selector:
+        number:
+          min: 0
+          max: 1000
+          step: 1
+          mode: slider
+          unit_of_measurement: lx
+
     enable_lux_check:
       name: Abilita controllo lux in accensione
       default: true
@@ -178,6 +208,10 @@ blueprint:
 
     day_lux_threshold:
       name: Soglia lux giorno
+      description: >-
+        Soglia massima di lux per accendere le luci in profilo giorno.
+        Se lux esterno > questa soglia, la luce NON viene accesa (già abbastanza chiaro).
+        Usato anche come soglia di trigger per il calo di lux (vedere "Abilita trigger calo lux").
       default: 120
       selector:
         number:
@@ -186,6 +220,38 @@ blueprint:
           step: 1
           mode: slider
           unit_of_measurement: lx
+
+    enable_lux_trigger:
+      name: Abilita accensione automatica al calo di lux (crepuscolo)
+      description: >-
+        Se attivo, quando il sensore lux scende sotto la soglia del profilo attivo E
+        la presenza è già rilevata, le luci si accendono automaticamente senza attendere
+        un nuovo movimento del PIR. Ideale con sensore crepuscolare esterno: le luci
+        si accendono da sole al tramonto o quando arrivano le nuvole, se sei in stanza.
+        NOTA: il trigger usa come soglia il valore di "Soglia lux giorno" (deve restare
+        stabile per il tempo configurato in "Stabilità lux" per evitare falsi positivi).
+        Con mode=restart, un trigger lux che si attiva con assenza rilevata interrompe
+        il conto alla rovescia: la logica include un ripristino automatico di sicurezza.
+      default: false
+      selector:
+        boolean: {}
+
+    lux_trigger_stability_seconds:
+      name: Stabilità lux prima del trigger (s)
+      description: >-
+        Il sensore lux deve restare sotto la soglia giorno per almeno questo tempo
+        prima che venga attivata l'accensione automatica.
+        Evita accensioni spurie per brevi variazioni (nuvole passeggere, ombre momentanee).
+        Consigliato: 30-120 s. Con valori bassi il sistema è più reattivo ma più sensibile
+        alle fluttuazioni del sensore.
+      default: 60
+      selector:
+        number:
+          min: 5
+          max: 600
+          step: 5
+          mode: slider
+          unit_of_measurement: s
 
     day_brightness_pct:
       name: Luminosità giorno (%)
@@ -199,7 +265,7 @@ blueprint:
           unit_of_measurement: "%"
 
     day_transition_seconds:
-      name: Transizione giorno (s)
+      name: Transizione accensione giorno (s)
       default: 1
       selector:
         number:
@@ -222,6 +288,10 @@ blueprint:
 
     night_lux_threshold:
       name: Soglia lux notte
+      description: >-
+        Soglia massima di lux per accendere le luci in profilo notte.
+        Solitamente più bassa della soglia giorno perché di notte anche poca luce
+        ambientale può essere sufficiente.
       default: 20
       selector:
         number:
@@ -243,7 +313,7 @@ blueprint:
           unit_of_measurement: "%"
 
     night_transition_seconds:
-      name: Transizione notte (s)
+      name: Transizione accensione notte (s)
       default: 1
       selector:
         number:
@@ -301,6 +371,59 @@ blueprint:
           step: 100
           mode: slider
           unit_of_measurement: K
+
+    enable_pre_off_dim:
+      name: Abilita pre-spegnimento con dissolvenza (avviso visivo)
+      description: >-
+        Prima di spegnere le luci, le porta a bassa intensità per qualche secondo
+        come segnale visivo di imminente spegnimento.
+        Utile in bagno, studio o situazioni in cui uno spegnimento improvviso sarebbe
+        scomodo: l'utente vede la luce abbassarsi e sa che sta per spegnersi.
+        La fase di dimming usa la transizione configurata in "Transizione spegnimento".
+      default: false
+      selector:
+        boolean: {}
+
+    pre_off_dim_brightness_pct:
+      name: Luminosità pre-spegnimento (%)
+      description: Intensità ridotta durante la fase di avviso prima dello spegnimento.
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 50
+          step: 1
+          mode: slider
+          unit_of_measurement: "%"
+
+    pre_off_dim_duration_seconds:
+      name: Durata avviso pre-spegnimento (s)
+      description: >-
+        Tempo in cui le luci restano a bassa intensità prima dello spegnimento definitivo.
+        Durante questo periodo, se viene rilevato movimento, le luci tornano alla piena
+        intensità e il conto alla rovescia riparte normalmente.
+      default: 15
+      selector:
+        number:
+          min: 3
+          max: 120
+          step: 1
+          mode: slider
+          unit_of_measurement: s
+
+    off_transition_seconds:
+      name: Transizione allo spegnimento (s)
+      description: >-
+        Dissolvenza morbida quando le luci si spengono (e nella fase pre-spegnimento).
+        0 = spegnimento immediato senza dissolvenza.
+      default: 2
+      selector:
+        number:
+          min: 0
+          max: 30
+          step: 1
+          mode: slider
+          unit_of_measurement: s
 
     motion_on_debounce_seconds:
       name: Debounce movimento ON (s)
@@ -386,6 +509,17 @@ trigger:
     for:
       seconds: !input motion_off_debounce_seconds
 
+  # Trigger calo lux: si attiva quando il lux scende sotto la soglia giorno
+  # per almeno lux_trigger_stability_seconds. Gestito nell'action con enable_lux_trigger.
+  # Nota: il trigger è sempre presente nel blueprint; la logica enable_lux_trigger
+  # controlla se effettuare azioni o solo il ripristino di sicurezza.
+  - platform: numeric_state
+    id: lux_below_threshold
+    entity_id: !input lux_sensor
+    below: !input day_lux_threshold
+    for:
+      seconds: !input lux_trigger_stability_seconds
+
 variables:
   presence_sensor: !input presence_sensor
   mmwave_sensor: !input mmwave_sensor
@@ -406,8 +540,11 @@ variables:
   night_end_time: !input night_end_time
   sunset_offset_minutes: !input sunset_offset_minutes
   sunrise_offset_minutes: !input sunrise_offset_minutes
+  lux_night_detection_threshold: !input lux_night_detection_threshold
 
   enable_lux_check: !input enable_lux_check
+  enable_lux_trigger: !input enable_lux_trigger
+  lux_trigger_stability_seconds: !input lux_trigger_stability_seconds
   lux_fallback_value: !input lux_fallback_value
 
   day_lux_threshold: !input day_lux_threshold
@@ -425,6 +562,11 @@ variables:
   day_scene: !input day_scene
   night_scene: !input night_scene
 
+  enable_pre_off_dim: !input enable_pre_off_dim
+  pre_off_dim_brightness_pct: !input pre_off_dim_brightness_pct
+  pre_off_dim_duration_seconds: !input pre_off_dim_duration_seconds
+  off_transition_seconds: !input off_transition_seconds
+
   # Stato override manuale robusto (helper opzionale)
   # NOTA: espressione singola {{ }} per restituire un boolean nativo (non una stringa).
   override_active: "{{ (manual_override_helper | string | length > 0) and is_state(manual_override_helper, 'on') }}"
@@ -441,9 +583,11 @@ variables:
       {{ lux_fallback_value | float }}
     {% endif %}
 
-  # Notte robusta: time_based (anche oltre mezzanotte) o sun_based con offset.
-  # Usa namespace + {%- -%} per produrre esattamente "True"/"False" senza spazi,
-  # così il valore viene trattato correttamente come boolean nei template a valle.
+  # Rilevamento notte: time_based, sun_based, o lux_based (sensore crepuscolare esterno).
+  # Modalità lux_based: ideale con sensore crepuscolare esterno. Il profilo notte si attiva
+  # automaticamente quando il lux esterno scende sotto lux_night_detection_threshold,
+  # adattandosi a stagioni, meteo e condizioni reali senza bisogno di orari fissi.
+  # Usa namespace + {%- -%} per produrre esattamente "True"/"False" senza spazi.
   is_night: >-
     {%- set ns = namespace(v=false) -%}
     {%- if enable_night_mode -%}
@@ -455,6 +599,9 @@ variables:
         {%- else -%}
           {%- set ns.v = now() >= start or now() < stop -%}
         {%- endif -%}
+      {%- elif night_detection_mode == 'lux_based' -%}
+        {%- set lux_val = current_lux | float(lux_fallback_value | float(999)) -%}
+        {%- set ns.v = lux_val < (lux_night_detection_threshold | float(50)) -%}
       {%- else -%}
         {%- set now_ts = as_timestamp(now()) -%}
         {%- set next_rising = as_timestamp(state_attr('sun.sun', 'next_rising')) -%}
@@ -494,7 +641,7 @@ variables:
 
 action:
   - choose:
-      # 1) Rilevamento presenza -> logica accensione
+      # 1) Rilevamento presenza (PIR ON) -> logica accensione
       - conditions:
           - condition: template
             value_template: "{{ trigger.id == 'motion_on' }}"
@@ -543,7 +690,96 @@ action:
                       brightness_pct: "{{ active_brightness | int(100) }}"
                       transition: "{{ active_transition | int(0) }}"
 
-      # 2) Rilevamento assenza -> logica spegnimento (mai legata ai lux)
+      # 2) Trigger calo lux + presenza rilevata -> accensione automatica al crepuscolo
+      # Si attiva quando la luce esterna scende sotto soglia giorno e qualcuno è già in stanza.
+      # Permette alle luci di accendersi automaticamente al tramonto o quando arrivano le nuvole
+      # senza attendere un nuovo movimento del sensore PIR.
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'lux_below_threshold' }}"
+          - condition: template
+            value_template: "{{ automation_enabled }}"
+          - condition: template
+            value_template: "{{ enable_lux_trigger }}"
+          - condition: template
+            value_template: "{{ enable_lux_check }}"
+          - condition: template
+            value_template: "{{ not override_active }}"
+          - condition: template
+            value_template: "{{ is_state(presence_sensor, 'on') }}"
+          - condition: template
+            value_template: "{{ enough_time_since_last_run }}"
+          - condition: template
+            value_template: >-
+              {{ (not skip_if_light_already_on) or
+                 expand(light_target.entity_id) | selectattr('state', 'eq', 'on') | list | count == 0 }}
+          # Il trigger è già sotto day_lux_threshold; verifica anche active_lux_threshold
+          # (potrebbe differire in profilo notte se night_lux_threshold < day_lux_threshold)
+          - condition: template
+            value_template: >-
+              {{ (current_lux | float(999999)) < (active_lux_threshold | float(0)) }}
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ brightness_mode == 'scene_control' }}"
+                  - condition: template
+                    value_template: >-
+                      {{ (is_night | bool and (night_scene | string | length > 0))
+                         or ((not (is_night | bool)) and (day_scene | string | length > 0)) }}
+                sequence:
+                  - service: scene.turn_on
+                    target:
+                      entity_id: "{{ night_scene if is_night | bool else day_scene }}"
+            default:
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ enable_color_temp | bool }}"
+                    sequence:
+                      - service: light.turn_on
+                        target: !input light_target
+                        data:
+                          brightness_pct: "{{ active_brightness | int(100) }}"
+                          transition: "{{ active_transition | int(0) }}"
+                          color_temp_kelvin: "{{ active_color_temp | int(4000) }}"
+                default:
+                  - service: light.turn_on
+                    target: !input light_target
+                    data:
+                      brightness_pct: "{{ active_brightness | int(100) }}"
+                      transition: "{{ active_transition | int(0) }}"
+
+      # 3) Trigger calo lux con ASSENZA rilevata -> ripristino sicuro del timer di spegnimento
+      # Con mode=restart, il trigger lux può interrompere un conto alla rovescia in corso.
+      # Questo handler garantisce che le luci vengano comunque spente se la stanza è vuota.
+      # Non esegue se il trigger lux è usato per accendere (caso 2) né se c'è presenza (PIR ON).
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'lux_below_threshold' }}"
+          - condition: template
+            value_template: "{{ automation_enabled }}"
+          - condition: template
+            value_template: "{{ is_state(presence_sensor, 'off') }}"
+        sequence:
+          # Breve attesa di sicurezza prima di spegnere (max 60s o timeout attivo, il minore)
+          - delay:
+              seconds: >-
+                {{ [active_timeout | int(60), 60] | min }}
+          # Ricontrolla assenza e override prima di spegnere
+          - condition: state
+            entity_id: !input presence_sensor
+            state: "off"
+          - condition: template
+            value_template: >-
+              {{ (not ((manual_override_helper | string | length > 0) and is_state(manual_override_helper, 'on')))
+                 or keep_auto_off_during_override }}
+          - service: light.turn_off
+            target: !input light_target
+            data:
+              transition: "{{ off_transition_seconds | int(0) }}"
+
+      # 4) Rilevamento assenza (PIR OFF) -> logica spegnimento (mai legata ai lux)
       - conditions:
           - condition: template
             value_template: "{{ trigger.id == 'motion_off' }}"
@@ -581,5 +817,27 @@ action:
             value_template: >-
               {{ (not ((manual_override_helper | string | length > 0) and is_state(manual_override_helper, 'on')))
                  or keep_auto_off_during_override }}
+          # Pre-spegnimento con dissolvenza (opzionale): abbassa la luce come avviso visivo
+          # prima dello spegnimento definitivo. Se durante il dimming torna il movimento,
+          # l'automazione si riavvia (mode=restart) e le luci tornano alla piena intensità.
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ enable_pre_off_dim | bool(false) }}"
+                sequence:
+                  - service: light.turn_on
+                    target: !input light_target
+                    data:
+                      brightness_pct: "{{ pre_off_dim_brightness_pct | int(10) }}"
+                      transition: "{{ off_transition_seconds | int(0) }}"
+                  - delay:
+                      seconds: "{{ pre_off_dim_duration_seconds | int(15) }}"
+                  # Ricontrolla assenza dopo la fase di avviso
+                  - condition: state
+                    entity_id: !input presence_sensor
+                    state: "off"
+          # Spegnimento definitivo con transizione morbida
           - service: light.turn_off
             target: !input light_target
+            data:
+              transition: "{{ off_transition_seconds | int(0) }}"
