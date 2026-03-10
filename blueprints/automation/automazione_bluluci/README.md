@@ -33,6 +33,7 @@ Usa sempre `raw.githubusercontent.com`.
 | PIR / presenza | `binary_sensor` | ✅ Sì |
 | mmWave / radar (es. LD2410) | `binary_sensor` | No (opzionale) |
 | Luminosità (lux) | `sensor` | ✅ Sì |
+| Sensore crepuscolare esterno (lux) | `sensor` | No (opzionale, consigliato con `lux_based`) |
 | Sole (`sun.sun`) | entità HA | Solo in modalità sole |
 
 ### Profili giorno/notte
@@ -49,11 +50,16 @@ per determinare quando è "notte":
 Se hai un sensore lux esterno (es. sul tetto, sul balcone o integrato nella stazione meteo),
 la modalità `lux_based` è la scelta migliore:
 
+- Puoi impostare un **sensore crepuscolare dedicato** per decidere quando è notte,
+  separato dal sensore lux usato per l'accensione/spegnimento
+
 - **Nessun orario da configurare**: il sistema si adatta automaticamente a stagioni e meteo
 - **Reazione al meteo**: se arrivano nuvole temporalesche, entra in profilo notte anche di giorno
 - **Tramonto reale**: non serve un offset per il sole, reagisce al lux effettivo
 
 Parametro chiave: **Soglia lux per profilo notte** (default 50 lx). Se lux < soglia → profilo notte.
+Se valorizzi **Sensore crepuscolare esterno**, il confronto viene fatto su quel sensore;
+altrimenti viene usato il sensore lux principale.
 
 ---
 
