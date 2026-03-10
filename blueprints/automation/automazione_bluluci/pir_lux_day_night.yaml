@@ -503,5 +503,9 @@ action:
           - condition: state
             entity_id: !input presence_sensor
             state: "off"
+          - condition: template
+            value_template: >-
+              {{ (not ((manual_override_helper | string | length > 0) and is_state(manual_override_helper, 'on')))
+                 or keep_auto_off_during_override }}
           - service: light.turn_off
             target: !input light_target
