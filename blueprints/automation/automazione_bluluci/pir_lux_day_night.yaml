@@ -1,0 +1,464 @@
+blueprint:
+  name: "Auto Luci PIR + Lux (Giorno/Notte) - Robusto"
+  description: >-
+    Blueprint professionale per accensione/spegnimento luci basato su presenza PIR e luminosità,
+    con profili giorno/notte, override manuale, debounce, fallback sensori e supporto multi-luce.
+  domain: automation
+  source_url: https://example.local/blueprints/automazione_bluluci/pir_lux_day_night
+
+input:
+  presence_sensor:
+    name: Sensore presenza (PIR)
+    description: Binary sensor che indica movimento/presenza (on/off).
+    selector:
+      entity:
+        domain: binary_sensor
+
+  lux_sensor:
+    name: Sensore luminosità (lux)
+    description: Sensore lux usato SOLO in fase di accensione.
+    selector:
+      entity:
+        domain: sensor
+
+  light_target:
+    name: Luci target
+    description: Una o più luci da controllare.
+    selector:
+      target:
+        entity:
+          domain: light
+
+  automation_enabled:
+    name: Automazione abilitata
+    description: Disabilita rapidamente la logica senza rimuovere l'automazione.
+    default: true
+    selector:
+      boolean: {}
+
+  manual_override_helper:
+    name: Helper override manuale (opzionale)
+    description: >-
+      Se selezionato e impostato su ON, sospende la logica automatica.
+      Utile per blocco temporaneo dopo comando manuale.
+    default: ""
+    selector:
+      entity:
+        domain: input_boolean
+
+  keep_auto_off_during_override:
+    name: Mantieni spegnimento auto durante override
+    description: >-
+      Se attivo, durante override l'automazione NON accende ma può ancora spegnere
+      su assenza.
+    default: true
+    selector:
+      boolean: {}
+
+  skip_if_light_already_on:
+    name: Salta accensione se luce già ON
+    description: Evita chiamate inutili quando almeno una luce target è già accesa.
+    default: true
+    selector:
+      boolean: {}
+
+  enable_night_mode:
+    name: Abilita profilo notte
+    description: Se disattivato viene sempre usato il profilo giorno.
+    default: true
+    selector:
+      boolean: {}
+
+  night_detection_mode:
+    name: Rilevamento notte
+    description: Scegli se usare fascia oraria o posizione sole.
+    default: time_based
+    selector:
+      select:
+        options:
+          - label: Basato su orario
+            value: time_based
+          - label: Basato su sole
+            value: sun_based
+
+  night_start_time:
+    name: Inizio notte (modalità oraria)
+    description: Usato solo se night_detection_mode = time_based.
+    default: "22:30:00"
+    selector:
+      time: {}
+
+  night_end_time:
+    name: Fine notte (modalità oraria)
+    description: Usato solo se night_detection_mode = time_based.
+    default: "06:30:00"
+    selector:
+      time: {}
+
+  sunset_offset_minutes:
+    name: Offset tramonto minuti (modalità sole)
+    description: Valori negativi anticipano la notte, positivi la ritardano.
+    default: 0
+    selector:
+      number:
+        min: -180
+        max: 180
+        step: 1
+        mode: box
+        unit_of_measurement: min
+
+  sunrise_offset_minutes:
+    name: Offset alba minuti (modalità sole)
+    description: Valori negativi anticipano fine notte, positivi la estendono.
+    default: 0
+    selector:
+      number:
+        min: -180
+        max: 180
+        step: 1
+        mode: box
+        unit_of_measurement: min
+
+  enable_lux_check:
+    name: Abilita controllo lux in accensione
+    default: true
+    selector:
+      boolean: {}
+
+  lux_fallback_value:
+    name: Lux fallback (sensore unknown/unavailable)
+    description: Valore usato quando il sensore lux non è valido.
+    default: 999
+    selector:
+      number:
+        min: 0
+        max: 5000
+        step: 1
+        mode: box
+        unit_of_measurement: lx
+
+  day_lux_threshold:
+    name: Soglia lux giorno
+    default: 120
+    selector:
+      number:
+        min: 0
+        max: 5000
+        step: 1
+        mode: slider
+        unit_of_measurement: lx
+
+  day_brightness_pct:
+    name: Luminosità giorno (%)
+    default: 85
+    selector:
+      number:
+        min: 1
+        max: 100
+        step: 1
+        mode: slider
+        unit_of_measurement: "%"
+
+  day_transition_seconds:
+    name: Transizione giorno (s)
+    default: 1
+    selector:
+      number:
+        min: 0
+        max: 30
+        step: 1
+        mode: slider
+        unit_of_measurement: s
+
+  day_no_motion_timeout_seconds:
+    name: Timeout assenza giorno (s)
+    default: 180
+    selector:
+      number:
+        min: 5
+        max: 7200
+        step: 1
+        mode: box
+        unit_of_measurement: s
+
+  night_lux_threshold:
+    name: Soglia lux notte
+    default: 20
+    selector:
+      number:
+        min: 0
+        max: 5000
+        step: 1
+        mode: slider
+        unit_of_measurement: lx
+
+  night_brightness_pct:
+    name: Luminosità notte (%)
+    default: 25
+    selector:
+      number:
+        min: 1
+        max: 100
+        step: 1
+        mode: slider
+        unit_of_measurement: "%"
+
+  night_transition_seconds:
+    name: Transizione notte (s)
+    default: 1
+    selector:
+      number:
+        min: 0
+        max: 30
+        step: 1
+        mode: slider
+        unit_of_measurement: s
+
+  night_no_motion_timeout_seconds:
+    name: Timeout assenza notte (s)
+    default: 90
+    selector:
+      number:
+        min: 5
+        max: 7200
+        step: 1
+        mode: box
+        unit_of_measurement: s
+
+  motion_on_debounce_seconds:
+    name: Debounce movimento ON (s)
+    description: Il movimento deve restare ON per questo tempo prima del trigger.
+    default: 0
+    selector:
+      number:
+        min: 0
+        max: 30
+        step: 1
+        mode: slider
+        unit_of_measurement: s
+
+  motion_off_debounce_seconds:
+    name: Debounce assenza OFF (s)
+    description: L'assenza deve restare OFF per questo tempo prima del trigger.
+    default: 0
+    selector:
+      number:
+        min: 0
+        max: 30
+        step: 1
+        mode: slider
+        unit_of_measurement: s
+
+  min_time_between_runs_seconds:
+    name: Tempo minimo tra nuove accensioni (s)
+    description: Antirimbalzo logico per evitare comandi ON troppo ravvicinati.
+    default: 2
+    selector:
+      number:
+        min: 0
+        max: 300
+        step: 1
+        mode: box
+        unit_of_measurement: s
+
+  brightness_mode:
+    name: Modalità controllo luci
+    description: >-
+      brightness_control: usa brightness + transition.
+      scene_control: attiva scene giorno/notte (se configurate).
+    default: brightness_control
+    selector:
+      select:
+        options:
+          - label: Controllo luminosità
+            value: brightness_control
+          - label: Controllo scene
+            value: scene_control
+
+  day_scene:
+    name: Scena giorno (opzionale)
+    description: Usata solo con brightness_mode = scene_control.
+    default: ""
+    selector:
+      entity:
+        domain: scene
+
+  night_scene:
+    name: Scena notte (opzionale)
+    description: Usata solo con brightness_mode = scene_control.
+    default: ""
+    selector:
+      entity:
+        domain: scene
+
+mode: restart
+max_exceeded: silent
+
+trigger:
+  - platform: state
+    id: motion_on
+    entity_id: !input presence_sensor
+    to: "on"
+    for:
+      seconds: !input motion_on_debounce_seconds
+
+  - platform: state
+    id: motion_off
+    entity_id: !input presence_sensor
+    to: "off"
+    for:
+      seconds: !input motion_off_debounce_seconds
+
+variables:
+  presence_sensor: !input presence_sensor
+  lux_sensor: !input lux_sensor
+  light_target: !input light_target
+
+  automation_enabled: !input automation_enabled
+  manual_override_helper: !input manual_override_helper
+  keep_auto_off_during_override: !input keep_auto_off_during_override
+  skip_if_light_already_on: !input skip_if_light_already_on
+
+  enable_night_mode: !input enable_night_mode
+  night_detection_mode: !input night_detection_mode
+  night_start_time: !input night_start_time
+  night_end_time: !input night_end_time
+  sunset_offset_minutes: !input sunset_offset_minutes
+  sunrise_offset_minutes: !input sunrise_offset_minutes
+
+  enable_lux_check: !input enable_lux_check
+  lux_fallback_value: !input lux_fallback_value
+
+  day_lux_threshold: !input day_lux_threshold
+  day_brightness_pct: !input day_brightness_pct
+  day_transition_seconds: !input day_transition_seconds
+  day_no_motion_timeout_seconds: !input day_no_motion_timeout_seconds
+
+  night_lux_threshold: !input night_lux_threshold
+  night_brightness_pct: !input night_brightness_pct
+  night_transition_seconds: !input night_transition_seconds
+  night_no_motion_timeout_seconds: !input night_no_motion_timeout_seconds
+
+  min_time_between_runs_seconds: !input min_time_between_runs_seconds
+  brightness_mode: !input brightness_mode
+  day_scene: !input day_scene
+  night_scene: !input night_scene
+
+  # Stato override manuale robusto (helper opzionale)
+  override_active: >-
+    {% if manual_override_helper | string | length > 0 %}
+      {{ is_state(manual_override_helper, 'on') }}
+    {% else %}
+      false
+    {% endif %}
+
+  # Parsing lux robusto con fallback
+  current_lux_raw: "{{ states(lux_sensor) }}"
+  valid_lux: >-
+    {{ current_lux_raw not in ['unknown', 'unavailable', 'none', 'None', '']
+       and (current_lux_raw | float(none)) is not none }}
+  current_lux: >-
+    {% if valid_lux %}
+      {{ current_lux_raw | float }}
+    {% else %}
+      {{ lux_fallback_value | float }}
+    {% endif %}
+
+  # Notte robusta: time_based (anche oltre mezzanotte) o sun_based con offset
+  is_night: >-
+    {% if not enable_night_mode %}
+      false
+    {% elif night_detection_mode == 'time_based' %}
+      {% set start = today_at(night_start_time) %}
+      {% set stop = today_at(night_end_time) %}
+      {% if start <= stop %}
+        {{ now() >= start and now() < stop }}
+      {% else %}
+        {{ now() >= start or now() < stop }}
+      {% endif %}
+    {% else %}
+      {% set now_ts = as_timestamp(now()) %}
+      {% set next_rising = as_timestamp(state_attr('sun.sun', 'next_rising')) %}
+      {% set next_setting = as_timestamp(state_attr('sun.sun', 'next_setting')) %}
+      {% set sunrise_off = (sunrise_offset_minutes | int(0)) * 60 %}
+      {% set sunset_off = (sunset_offset_minutes | int(0)) * 60 %}
+      {% if next_rising is number and next_setting is number %}
+        {% if next_setting > next_rising %}
+          {% set prev_setting = next_setting - 86400 %}
+          {{ now_ts >= (prev_setting + sunset_off) or now_ts < (next_rising + sunrise_off) }}
+        {% else %}
+          {% set prev_rising = next_rising - 86400 %}
+          {{ now_ts >= (next_setting + sunset_off) or now_ts < (prev_rising + sunrise_off) }}
+        {% endif %}
+      {% else %}
+        {{ is_state('sun.sun', 'below_horizon') }}
+      {% endif %}
+    {% endif %}
+
+  active_lux_threshold: "{{ night_lux_threshold if is_night else day_lux_threshold }}"
+  active_brightness: "{{ night_brightness_pct if is_night else day_brightness_pct }}"
+  active_transition: "{{ night_transition_seconds if is_night else day_transition_seconds }}"
+  active_timeout: "{{ night_no_motion_timeout_seconds if is_night else day_no_motion_timeout_seconds }}"
+
+  # Antirimbalzo tra run (rilevante per accensioni)
+  now_ts: "{{ as_timestamp(now()) }}"
+  last_run_ts: "{{ as_timestamp(this.attributes.last_triggered, 0) }}"
+  enough_time_since_last_run: >-
+    {{ (now_ts - last_run_ts) >= (min_time_between_runs_seconds | int(0)) }}
+
+action:
+  - choose:
+      # 1) Rilevamento presenza -> logica accensione
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'motion_on' }}"
+          - condition: template
+            value_template: "{{ automation_enabled }}"
+          - condition: template
+            value_template: "{{ not override_active }}"
+          - condition: template
+            value_template: "{{ enough_time_since_last_run }}"
+          - condition: template
+            value_template: >-
+              {{ (not skip_if_light_already_on) or
+                 expand(light_target.entity_id) | selectattr('state', 'eq', 'on') | list | count == 0 }}
+          - condition: template
+            value_template: >-
+              {{ (not enable_lux_check) or ((current_lux | float(999999)) < (active_lux_threshold | float(0))) }}
+        sequence:
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: "{{ brightness_mode == 'scene_control' }}"
+                  - condition: template
+                    value_template: >-
+                      {{ (is_night and (night_scene | string | length > 0))
+                         or ((not is_night) and (day_scene | string | length > 0)) }}
+                sequence:
+                  - service: scene.turn_on
+                    target:
+                      entity_id: "{{ night_scene if is_night else day_scene }}"
+            default:
+              - service: light.turn_on
+                target: !input light_target
+                data:
+                  brightness_pct: "{{ active_brightness | int(100) }}"
+                  transition: "{{ active_transition | int(0) }}"
+
+      # 2) Rilevamento assenza -> logica spegnimento (mai legata ai lux)
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'motion_off' }}"
+          - condition: template
+            value_template: "{{ automation_enabled }}"
+          - condition: template
+            value_template: >-
+              {{ (not override_active) or keep_auto_off_during_override }}
+        sequence:
+          - delay:
+              seconds: "{{ active_timeout | int(0) }}"
+          - condition: state
+            entity_id: !input presence_sensor
+            state: "off"
+          - service: light.turn_off
+            target: !input light_target
