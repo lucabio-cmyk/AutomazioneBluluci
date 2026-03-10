@@ -28,12 +28,22 @@ blueprint:
         entity:
           domain: binary_sensor
 
+    enable_mmwave_timeout:
+      name: Abilita timeout massimo mmWave (opzionale)
+      description: >-
+        Se attivo, applica un timeout massimo di sicurezza al mantenimento luce tramite mmWave.
+        Se disattivato, la luce resta accesa indefinitamente finché il sensore mmWave rileva presenza.
+      default: true
+      selector:
+        boolean: {}
+
     mmwave_keep_on_timeout_seconds:
       name: Timeout massimo mantenimento luce mmWave (s)
       description: >-
         Tempo massimo aggiuntivo (dopo il timeout base assenza PIR) per cui la luce
         resta accesa se il sensore mmWave rileva ancora presenza.
         Allo scadere di questo timeout la luce si spegne comunque (sicurezza anti-blocco).
+        Ignorato se "Abilita timeout massimo mmWave" è disattivato.
       default: 600
       selector:
         number:
@@ -379,6 +389,7 @@ trigger:
 variables:
   presence_sensor: !input presence_sensor
   mmwave_sensor: !input mmwave_sensor
+  enable_mmwave_timeout: !input enable_mmwave_timeout
   mmwave_keep_on_timeout_seconds: !input mmwave_keep_on_timeout_seconds
   has_mmwave: "{{ mmwave_sensor | string | length > 0 }}"
   lux_sensor: !input lux_sensor
@@ -544,17 +555,25 @@ action:
         sequence:
           - delay:
               seconds: "{{ active_timeout | int(0) }}"
-          # Se mmWave è configurato e rileva ancora presenza, attendi che si liberi
-          # (massimo mmwave_keep_on_timeout_seconds per sicurezza anti-blocco)
+          # Se mmWave è configurato e rileva ancora presenza, attendi che si liberi.
+          # Se enable_mmwave_timeout è attivo, applica il timeout massimo di sicurezza anti-blocco;
+          # altrimenti attende indefinitamente finché il sensore mmWave rileva presenza.
           - choose:
               - conditions:
                   - condition: template
                     value_template: "{{ has_mmwave and is_state(mmwave_sensor, 'on') }}"
                 sequence:
-                  - wait_template: "{{ is_state(mmwave_sensor, 'off') }}"
-                    timeout:
-                      seconds: "{{ mmwave_keep_on_timeout_seconds | int(600) }}"
-                    continue_on_timeout: true
+                  - choose:
+                      - conditions:
+                          - condition: template
+                            value_template: "{{ enable_mmwave_timeout | bool(true) }}"
+                        sequence:
+                          - wait_template: "{{ is_state(mmwave_sensor, 'off') }}"
+                            timeout:
+                              seconds: "{{ mmwave_keep_on_timeout_seconds | int(600) }}"
+                            continue_on_timeout: true
+                    default:
+                      - wait_template: "{{ is_state(mmwave_sensor, 'off') }}"
           - condition: state
             entity_id: !input presence_sensor
             state: "off"
