@@ -377,12 +377,8 @@ variables:
   night_scene: !input night_scene
 
   # Stato override manuale robusto (helper opzionale)
-  override_active: >-
-    {% if manual_override_helper | string | length > 0 %}
-      {{ is_state(manual_override_helper, 'on') }}
-    {% else %}
-      false
-    {% endif %}
+  # NOTA: espressione singola {{ }} per restituire un boolean nativo (non una stringa).
+  override_active: "{{ (manual_override_helper | string | length > 0) and is_state(manual_override_helper, 'on') }}"
 
   # Parsing lux robusto con fallback
   current_lux_raw: "{{ states(lux_sensor) }}"
@@ -396,41 +392,45 @@ variables:
       {{ lux_fallback_value | float }}
     {% endif %}
 
-  # Notte robusta: time_based (anche oltre mezzanotte) o sun_based con offset
+  # Notte robusta: time_based (anche oltre mezzanotte) o sun_based con offset.
+  # Usa namespace + {%- -%} per produrre esattamente "True"/"False" senza spazi,
+  # così il valore viene trattato correttamente come boolean nei template a valle.
   is_night: >-
-    {% if not enable_night_mode %}
-      false
-    {% elif night_detection_mode == 'time_based' %}
-      {% set start = today_at(night_start_time) %}
-      {% set stop = today_at(night_end_time) %}
-      {% if start <= stop %}
-        {{ now() >= start and now() < stop }}
-      {% else %}
-        {{ now() >= start or now() < stop }}
-      {% endif %}
-    {% else %}
-      {% set now_ts = as_timestamp(now()) %}
-      {% set next_rising = as_timestamp(state_attr('sun.sun', 'next_rising')) %}
-      {% set next_setting = as_timestamp(state_attr('sun.sun', 'next_setting')) %}
-      {% set sunrise_off = (sunrise_offset_minutes | int(0)) * 60 %}
-      {% set sunset_off = (sunset_offset_minutes | int(0)) * 60 %}
-      {% if next_rising is number and next_setting is number %}
-        {% if next_setting > next_rising %}
-          {% set prev_setting = next_setting - 86400 %}
-          {{ now_ts >= (prev_setting + sunset_off) or now_ts < (next_rising + sunrise_off) }}
-        {% else %}
-          {% set prev_rising = next_rising - 86400 %}
-          {{ now_ts >= (next_setting + sunset_off) or now_ts < (prev_rising + sunrise_off) }}
-        {% endif %}
-      {% else %}
-        {{ is_state('sun.sun', 'below_horizon') }}
-      {% endif %}
-    {% endif %}
+    {%- set ns = namespace(v=false) -%}
+    {%- if enable_night_mode -%}
+      {%- if night_detection_mode == 'time_based' -%}
+        {%- set start = today_at(night_start_time) -%}
+        {%- set stop = today_at(night_end_time) -%}
+        {%- if start <= stop -%}
+          {%- set ns.v = now() >= start and now() < stop -%}
+        {%- else -%}
+          {%- set ns.v = now() >= start or now() < stop -%}
+        {%- endif -%}
+      {%- else -%}
+        {%- set now_ts = as_timestamp(now()) -%}
+        {%- set next_rising = as_timestamp(state_attr('sun.sun', 'next_rising')) -%}
+        {%- set next_setting = as_timestamp(state_attr('sun.sun', 'next_setting')) -%}
+        {%- set sunrise_off = (sunrise_offset_minutes | int(0)) * 60 -%}
+        {%- set sunset_off = (sunset_offset_minutes | int(0)) * 60 -%}
+        {%- if next_rising is number and next_setting is number -%}
+          {%- if next_setting > next_rising -%}
+            {%- set prev_setting = next_setting - 86400 -%}
+            {%- set ns.v = now_ts >= (prev_setting + sunset_off) or now_ts < (next_rising + sunrise_off) -%}
+          {%- else -%}
+            {%- set prev_rising = next_rising - 86400 -%}
+            {%- set ns.v = now_ts >= (next_setting + sunset_off) or now_ts < (prev_rising + sunrise_off) -%}
+          {%- endif -%}
+        {%- else -%}
+          {%- set ns.v = is_state('sun.sun', 'below_horizon') -%}
+        {%- endif -%}
+      {%- endif -%}
+    {%- endif -%}
+    {{ ns.v }}
 
-  active_lux_threshold: "{{ night_lux_threshold if is_night else day_lux_threshold }}"
-  active_brightness: "{{ night_brightness_pct if is_night else day_brightness_pct }}"
-  active_transition: "{{ night_transition_seconds if is_night else day_transition_seconds }}"
-  active_timeout: "{{ night_no_motion_timeout_seconds if is_night else day_no_motion_timeout_seconds }}"
+  active_lux_threshold: "{{ night_lux_threshold if is_night | bool else day_lux_threshold }}"
+  active_brightness: "{{ night_brightness_pct if is_night | bool else day_brightness_pct }}"
+  active_transition: "{{ night_transition_seconds if is_night | bool else day_transition_seconds }}"
+  active_timeout: "{{ night_no_motion_timeout_seconds if is_night | bool else day_no_motion_timeout_seconds }}"
 
   # Antirimbalzo tra run (rilevante per accensioni)
   now_ts: "{{ as_timestamp(now()) }}"
@@ -464,12 +464,12 @@ action:
                     value_template: "{{ brightness_mode == 'scene_control' }}"
                   - condition: template
                     value_template: >-
-                      {{ (is_night and (night_scene | string | length > 0))
-                         or ((not is_night) and (day_scene | string | length > 0)) }}
+                      {{ (is_night | bool and (night_scene | string | length > 0))
+                         or ((not (is_night | bool)) and (day_scene | string | length > 0)) }}
                 sequence:
                   - service: scene.turn_on
                     target:
-                      entity_id: "{{ night_scene if is_night else day_scene }}"
+                      entity_id: "{{ night_scene if is_night | bool else day_scene }}"
             default:
               - service: light.turn_on
                 target: !input light_target
