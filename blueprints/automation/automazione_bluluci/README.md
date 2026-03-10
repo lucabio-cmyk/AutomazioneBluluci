@@ -14,10 +14,8 @@ stai quasi sicuramente importando la **pagina HTML di GitHub** (URL `github.com/
 Usa sempre il link `raw.githubusercontent.com`, ad esempio:
 
 ```text
-https://raw.githubusercontent.com/<USER_O_ORG>/AutomazioneBluluci/main/blueprints/automation/automazione_bluluci/pir_lux_day_night.yaml
+https://raw.githubusercontent.com/lucabio-cmyk/AutomazioneBluluci/main/blueprints/automation/automazione_bluluci/pir_lux_day_night.yaml
 ```
-
-Sostituisci `<USER_O_ORG>` con il tuo utente/organizzazione GitHub.
 
 ## Nota sul blueprint
 
