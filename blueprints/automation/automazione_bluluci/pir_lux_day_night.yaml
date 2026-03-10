@@ -254,6 +254,44 @@ blueprint:
           mode: box
           unit_of_measurement: s
 
+    enable_color_temp:
+      name: Abilita controllo temperatura colore (bianco)
+      description: >-
+        Se attivo, imposta la temperatura colore (bianco caldo/freddo) all'accensione,
+        differenziata tra profilo giorno e notte.
+        Funziona solo con luci che supportano la temperatura colore (es. lampadine LED RGBW o CCT).
+      default: false
+      selector:
+        boolean: {}
+
+    day_color_temp_kelvin:
+      name: Temperatura colore giorno (K)
+      description: >-
+        Temperatura del bianco di giorno. Valori più alti = bianco più freddo/neutro
+        (es. 4000K = bianco neutro, 6500K = bianco freddo luce del giorno).
+      default: 4000
+      selector:
+        number:
+          min: 2000
+          max: 6500
+          step: 100
+          mode: slider
+          unit_of_measurement: K
+
+    night_color_temp_kelvin:
+      name: Temperatura colore notte (K)
+      description: >-
+        Temperatura del bianco di notte. Valori più bassi = bianco più caldo/ambra
+        (es. 2700K = bianco caldo, ideale per rilassarsi e non disturbare il sonno).
+      default: 2700
+      selector:
+        number:
+          min: 2000
+          max: 6500
+          step: 100
+          mode: slider
+          unit_of_measurement: K
+
     motion_on_debounce_seconds:
       name: Debounce movimento ON (s)
       description: Il movimento deve restare ON per questo tempo prima del trigger.
@@ -432,6 +470,11 @@ variables:
   active_transition: "{{ night_transition_seconds if is_night | bool else day_transition_seconds }}"
   active_timeout: "{{ night_no_motion_timeout_seconds if is_night | bool else day_no_motion_timeout_seconds }}"
 
+  enable_color_temp: !input enable_color_temp
+  day_color_temp_kelvin: !input day_color_temp_kelvin
+  night_color_temp_kelvin: !input night_color_temp_kelvin
+  active_color_temp: "{{ night_color_temp_kelvin if is_night | bool else day_color_temp_kelvin }}"
+
   # Antirimbalzo tra run (rilevante per accensioni)
   now_ts: "{{ as_timestamp(now()) }}"
   last_run_ts: "{{ as_timestamp(this.attributes.last_triggered, 0) }}"
@@ -471,11 +514,23 @@ action:
                     target:
                       entity_id: "{{ night_scene if is_night | bool else day_scene }}"
             default:
-              - service: light.turn_on
-                target: !input light_target
-                data:
-                  brightness_pct: "{{ active_brightness | int(100) }}"
-                  transition: "{{ active_transition | int(0) }}"
+              - choose:
+                  - conditions:
+                      - condition: template
+                        value_template: "{{ enable_color_temp | bool }}"
+                    sequence:
+                      - service: light.turn_on
+                        target: !input light_target
+                        data:
+                          brightness_pct: "{{ active_brightness | int(100) }}"
+                          transition: "{{ active_transition | int(0) }}"
+                          color_temp_kelvin: "{{ active_color_temp | int(4000) }}"
+                default:
+                  - service: light.turn_on
+                    target: !input light_target
+                    data:
+                      brightness_pct: "{{ active_brightness | int(100) }}"
+                      transition: "{{ active_transition | int(0) }}"
 
       # 2) Rilevamento assenza -> logica spegnimento (mai legata ai lux)
       - conditions:
