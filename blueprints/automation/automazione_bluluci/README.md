@@ -1,24 +1,24 @@
-# Troubleshooting YAML parse errors
+# Import in Home Assistant da GitHub (fix errore YAML)
 
-If you see an error like:
+Se in Home Assistant vedi l'errore:
 
 ```text
 mapping values are not allowed here
 line 35, column 28: --tab-size-preference: 4;
 ```
 
-it means YAML is parsing a CSS declaration as YAML mapping syntax.
+stai quasi sicuramente importando la **pagina HTML di GitHub** (URL `github.com/.../blob/...`) invece del file YAML raw.
 
-## How to fix it
+## URL corretto da usare in Home Assistant
 
-When using CSS variables in YAML, put them inside a string block (or quote the full line), for example:
+Usa sempre il link `raw.githubusercontent.com`, ad esempio:
 
-```yaml
-card_mod:
-  style: |
-    :host {
-      --tab-size-preference: 4;
-    }
+```text
+https://raw.githubusercontent.com/<USER_O_ORG>/AutomazioneBluluci/main/blueprints/automation/automazione_bluluci/pir_lux_day_night.yaml
 ```
 
-Do **not** place raw CSS declarations at YAML key level.
+Sostituisci `<USER_O_ORG>` con il tuo utente/organizzazione GitHub.
+
+## Nota sul blueprint
+
+Nel file blueprint il campo `source_url` deve puntare allo stesso URL raw pubblico del file, così Home Assistant può gestire correttamente anche gli aggiornamenti.
