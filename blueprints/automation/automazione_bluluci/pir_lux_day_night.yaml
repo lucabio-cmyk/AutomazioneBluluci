@@ -386,6 +386,40 @@ blueprint:
           mode: slider
           unit_of_measurement: K
 
+    enable_circadian_color_temp:
+      name: Abilita temperatura colore circadiana (transizione continua)
+      description: >-
+        Se attivo, la temperatura colore varia in modo continuo in base all'ora del
+        giorno, seguendo un andamento graduale invece di passare bruscamente tra
+        profilo giorno (freddo) e notte (caldo).
+        - Modalità oraria: transizione lineare centrata su inizio/fine notte
+          (usa il parametro "Durata transizione circadiana").
+        - Modalità sole: segue l'elevazione solare (sole alto → bianco freddo,
+          tramonto/alba → interpolazione, notte → bianco caldo).
+        - Modalità lux esterno: interpola linearmente tra la soglia lux giorno
+          (bianco freddo) e la soglia lux notte (bianco caldo).
+        Richiede "Abilita controllo temperatura colore" attivo.
+      default: false
+      selector:
+        boolean: {}
+
+    circadian_transition_minutes:
+      name: Durata transizione circadiana (min) — solo modalità oraria
+      description: >-
+        Durata totale della transizione graduale tra temperatura colore giorno e notte,
+        centrata sull'orario di inizio/fine notte.
+        Esempio: con 60 min e notte alle 22:30, la transizione va da 4000K alle 22:00
+        fino a 2700K alle 23:00, passando per valori intermedi.
+        Ignorato in modalità sole e lux (che usano grandezze fisiche continue).
+      default: 60
+      selector:
+        number:
+          min: 10
+          max: 240
+          step: 10
+          mode: slider
+          unit_of_measurement: min
+
     enable_adaptive_brightness:
       name: Abilita luminosità adattiva al lux
       description: >-
@@ -708,7 +742,89 @@ variables:
   enable_color_temp: !input enable_color_temp
   day_color_temp_kelvin: !input day_color_temp_kelvin
   night_color_temp_kelvin: !input night_color_temp_kelvin
-  active_color_temp: "{{ night_color_temp_kelvin if is_night | bool else day_color_temp_kelvin }}"
+  enable_circadian_color_temp: !input enable_circadian_color_temp
+  circadian_transition_minutes: !input circadian_transition_minutes
+
+  # Temperatura colore attiva: se circadiana abilitata, interpola continuamente in base
+  # all'ora del giorno / elevazione solare / lux; altrimenti switch binario giorno/notte.
+  active_color_temp: >-
+    {%- set day_k = day_color_temp_kelvin | int(4000) -%}
+    {%- set night_k = night_color_temp_kelvin | int(2700) -%}
+    {%- if not (enable_circadian_color_temp | bool(false)) -%}
+      {{ night_k if is_night | bool else day_k }}
+    {%- elif night_detection_mode == 'lux_based' -%}
+      {# Interpolazione lineare: lux alto (giorno) → bianco freddo, lux basso (notte) → bianco caldo #}
+      {%- set lux_val = twilight_lux | float(999) -%}
+      {%- set lux_high = day_lux_threshold | float(120) -%}
+      {%- set lux_low = lux_night_detection_threshold | float(50) -%}
+      {%- if lux_high <= lux_low -%}
+        {{ night_k if is_night | bool else day_k }}
+      {%- elif lux_val >= lux_high -%}
+        {{ day_k }}
+      {%- elif lux_val <= lux_low -%}
+        {{ night_k }}
+      {%- else -%}
+        {%- set ratio = (lux_val - lux_low) / (lux_high - lux_low) -%}
+        {{ (night_k + (day_k - night_k) * ratio) | round | int }}
+      {%- endif -%}
+    {%- elif night_detection_mode == 'sun_based' -%}
+      {# Interpolazione continua basata sull'elevazione solare:
+         sole alto (≥15°) → bianco freddo (giorno); sotto orizzonte (≤-6°) → bianco caldo (notte);
+         tra -6° e 15° (alba/tramonto) → interpolazione lineare. #}
+      {%- set elev = state_attr('sun.sun', 'elevation') | float(0) -%}
+      {%- set elev_high = 15.0 -%}
+      {%- set elev_low = -6.0 -%}
+      {%- if elev >= elev_high -%}
+        {{ day_k }}
+      {%- elif elev <= elev_low -%}
+        {{ night_k }}
+      {%- else -%}
+        {%- set ratio = (elev - elev_low) / (elev_high - elev_low) -%}
+        {{ (night_k + (day_k - night_k) * ratio) | round | int }}
+      {%- endif -%}
+    {%- else -%}
+      {# Modalità oraria: transizione lineare centrata su night_start_time e night_end_time.
+         L'offset firmato indica quanti minuti siamo prima (negativo) o dopo (positivo) il centro
+         della transizione, in un giorno circolare di 1440 minuti. #}
+      {%- set trans = [10.0, circadian_transition_minutes | int(60) | float] | max -%}
+      {%- set half = trans / 2.0 -%}
+      {%- set now_min = now().hour * 60.0 + now().minute + now().second / 60.0 -%}
+      {%- set ns_parts = night_start_time.split(':') -%}
+      {%- set ns_min = ns_parts[0] | int * 60.0 + ns_parts[1] | int -%}
+      {%- set ne_parts = night_end_time.split(':') -%}
+      {%- set ne_min = ne_parts[0] | int * 60.0 + ne_parts[1] | int -%}
+      {# Offset firmato dal centro delle due transizioni, in range (-720, 720) minuti #}
+      {%- set dusk_off = ((now_min - ns_min + 720) % 1440) - 720 -%}
+      {%- set dawn_off = ((now_min - ne_min + 720) % 1440) - 720 -%}
+      {%- set in_dusk = dusk_off >= (-half) and dusk_off <= half -%}
+      {%- set in_dawn = dawn_off >= (-half) and dawn_off <= half -%}
+      {%- set ns = namespace(result=0) -%}
+      {%- if in_dusk and not in_dawn -%}
+        {# Zona di transizione serale (tramonto): da bianco freddo a bianco caldo #}
+        {%- set ratio = [0.0, [1.0, (dusk_off + half) / trans] | min] | max -%}
+        {%- set ns.result = (day_k + (night_k - day_k) * ratio) | round | int -%}
+      {%- elif in_dawn and not in_dusk -%}
+        {# Zona di transizione mattutina (alba): da bianco caldo a bianco freddo #}
+        {%- set ratio = [0.0, [1.0, (dawn_off + half) / trans] | min] | max -%}
+        {%- set ns.result = (night_k + (day_k - night_k) * ratio) | round | int -%}
+      {%- elif in_dusk -%}
+        {# Sovrapposizione (notte brevissima): priorità alla transizione più vicina al centro #}
+        {%- set dusk_abs = dusk_off if dusk_off >= 0 else -dusk_off -%}
+        {%- set dawn_abs = dawn_off if dawn_off >= 0 else -dawn_off -%}
+        {%- if dusk_abs <= dawn_abs -%}
+          {%- set ratio = [0.0, [1.0, (dusk_off + half) / trans] | min] | max -%}
+          {%- set ns.result = (day_k + (night_k - day_k) * ratio) | round | int -%}
+        {%- else -%}
+          {%- set ratio = [0.0, [1.0, (dawn_off + half) / trans] | min] | max -%}
+          {%- set ns.result = (night_k + (day_k - night_k) * ratio) | round | int -%}
+        {%- endif -%}
+      {%- elif is_night | bool -%}
+        {%- set ns.result = night_k -%}
+      {%- else -%}
+        {%- set ns.result = day_k -%}
+      {%- endif -%}
+      {{ ns.result }}
+    {%- endif -%}
 
   # Antirimbalzo tra run (rilevante per accensioni)
   now_ts: "{{ as_timestamp(now()) }}"

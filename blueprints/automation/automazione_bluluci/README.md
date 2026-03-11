@@ -95,6 +95,58 @@ Con **"Abilita luminosità adattiva al lux"** attivo:
 
 ---
 
+### 🆕 Temperatura colore circadiana (transizione continua)
+
+Con **"Abilita temperatura colore circadiana"** attivo (richiede anche "Abilita controllo temperatura colore"):
+
+- La temperatura colore non passa bruscamente da 4000K a 2700K, ma **varia in modo continuo
+  e graduale** in base all'ora del giorno, all'elevazione del sole o al lux esterno
+- Perfetto per ambienti domestici, camere da letto e uffici dove si vuole un'illuminazione
+  naturale e rilassante che accompagni il ritmo circadiano
+- Tre modalità di interpolazione, una per ciascun metodo di rilevamento notte:
+
+| Modalità | Logica di interpolazione |
+|---|---|
+| **Orario** | Transizione lineare centrata su inizio/fine notte, durata configurabile |
+| **Sole** | Segue l'elevazione solare: ≥15° → freddo, tra -6° e 15° → interpolato, ≤-6° → caldo |
+| **Lux esterno** | Interpola tra soglia lux giorno (bianco freddo) e soglia lux notte (bianco caldo) |
+
+#### Modalità oraria — esempio con `circadian_transition_minutes: 60`
+
+```
+Ore 21:00          22:00        22:30        23:00         ...
+    │                │            │            │
+    └──── 4000 K ────┤ 4000→2700K │← 2700 K──────────────
+                     │   (30min)  │(30min)     │
+                 inizio trans.  night_start fine trans.
+```
+
+Specularmente al mattino, la transizione inversa avviene centrata su `night_end_time`.
+
+#### Modalità sole — curva basata sull'elevazione
+
+```
+Elevazione solare:   > 15°   15° → -6°    < -6°
+Temperatura:          4000 K  interpolata  2700 K
+                      (giorno)  (alba/tramonto) (notte)
+```
+
+#### Modalità lux — risposta al lux esterno in tempo reale
+
+```
+lux ≥ soglia_giorno (es. 200 lx)  → 4000 K (bianco freddo)
+lux ≤ soglia_notte  (es. 50 lx)   → 2700 K (bianco caldo)
+lux tra le due soglie              → interpolazione lineare
+```
+
+> **Aggiornamento in tempo reale:** la temperatura viene ricalcolata ogni volta che
+> la luce si accende (a seguito di rilevamento movimento o trigger lux). Per aggiornare
+> la temperatura in modo continuo mentre sei già in stanza, puoi creare una seconda
+> automazione separata che chiama `light.turn_on` con solo `color_temp_kelvin` ogni
+> 10–15 minuti, condizionata a: presenza rilevata + luci accese.
+
+---
+
 ### 🆕 Pre-spegnimento con dissolvenza (avviso visivo)
 Con **"Abilita pre-spegnimento"** attivo:
 
@@ -154,6 +206,8 @@ off_transition_seconds: 3
 enable_color_temp: true
 day_color_temp_kelvin: 4000         # bianco neutro di giorno
 night_color_temp_kelvin: 2700       # bianco caldo di notte
+enable_circadian_color_temp: true   # transizione continua (no salto brusco giorno/notte)
+# Con lux_based, la transizione segue il lux in tempo reale → nessun parametro di durata
 ```
 
 ---
