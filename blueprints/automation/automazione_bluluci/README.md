@@ -78,6 +78,23 @@ Con **"Abilita accensione automatica al calo di lux"** attivo:
 
 ---
 
+### 🆕 Luminosità adattiva al lux
+Con **"Abilita luminosità adattiva al lux"** attivo:
+
+- La luminosità si calcola dinamicamente in base al rapporto lux/soglia del profilo attivo
+- **Buio totale (lux ≈ 0)** → luminosità al massimo del profilo (es. 85% giorno, 25% notte)
+- **Lux vicino alla soglia** → luminosità al minimo configurato (default 20%)
+- Interpolazione lineare continua: la luce "segue" il calo di luce naturale
+- Utile in ambienti con luce variabile (finestre, tramonto graduale, nuvole)
+- Funziona solo con modalità **"Controllo luminosità"** (non con le scene)
+- Richiede che il controllo lux sia abilitato e il sensore lux sia valido
+
+> **Esempio:** soglia giorno = 200 lx, luminosità max = 85%, minimo = 20%.
+> Con lux = 100 (metà soglia): luminosità = 20% + (85%-20%) × (1 - 0.5) = **52%**
+> Con lux = 10 (quasi buio): luminosità ≈ **83%**
+
+---
+
 ### 🆕 Pre-spegnimento con dissolvenza (avviso visivo)
 Con **"Abilita pre-spegnimento"** attivo:
 
@@ -104,6 +121,9 @@ Il sensore mmWave impedisce lo spegnimento automatico anche quando la persona è
 - **Timeout mmWave**: timeout massimo di sicurezza per evitare che le luci restino accese
   indefinitamente in caso di falsi positivi del radar
 - Opzione per disabilitare il timeout (luci accese finché il radar rileva presenza)
+- **Doppio controllo mmWave**: il sensore viene verificato sia prima della fase di pre-dimming
+  sia subito dopo — se il radar torna attivo durante il dimming (senza che il PIR si riattivi),
+  il sistema aspetta nuovamente che la presenza si liberi prima di spegnere
 
 ---
 
@@ -125,6 +145,8 @@ day_lux_threshold: 200              # lux: non accendere se c'è abbastanza luce
 night_lux_threshold: 15             # lux: di notte, accendi solo se è davvero buio
 enable_lux_trigger: true            # accensione automatica al tramonto con presenza
 lux_trigger_stability_seconds: 60  # il calo deve durare almeno 60s
+enable_adaptive_brightness: true    # luminosità adattiva: più buio = più luce
+adaptive_brightness_min_pct: 20     # minimo 20% anche con lux quasi a soglia
 enable_pre_off_dim: true            # avviso visivo prima dello spegnimento
 pre_off_dim_brightness_pct: 10
 pre_off_dim_duration_seconds: 15
