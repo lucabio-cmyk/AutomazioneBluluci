@@ -7,6 +7,8 @@ blueprint:
     presenza stazionaria anche dopo che il PIR non rileva più movimento.
     Novità: rilevamento notte tramite sensore lux esterno (crepuscolare), trigger automatico al calo
     di lux con presenza rilevata, dissolvenza pre-spegnimento e transizione morbida allo spegnimento.
+    Open space: supporto secondo sensore PIR (es. sala + cucina) — logica OR all'accensione,
+    AND allo spegnimento (entrambi i sensori devono essere liberi prima di spegnere le luci).
   domain: automation
   source_url: https://raw.githubusercontent.com/lucabio-cmyk/AutomazioneBluluci/main/blueprints/automation/automazione_bluluci/pir_lux_day_night.yaml
 
@@ -14,6 +16,19 @@ blueprint:
     presence_sensor:
       name: Sensore presenza (PIR)
       description: Binary sensor che indica movimento/presenza (on/off).
+      selector:
+        entity:
+          domain: binary_sensor
+
+    presence_sensor_2:
+      name: Secondo sensore presenza (opzionale, open space)
+      description: >-
+        Secondo sensore PIR per ambienti open space (es. sala + cucina collegati).
+        Se configurato, la logica diventa OR all'accensione (basta uno dei due sensori per
+        accendere le luci) e AND allo spegnimento (entrambi devono essere liberi prima di
+        avviare il conto alla rovescia per lo spegnimento).
+        Usa sensori identici per risultati ottimali. Lascia vuoto per zona singola.
+      default: ""
       selector:
         entity:
           domain: binary_sensor
@@ -585,6 +600,22 @@ trigger:
     for:
       seconds: !input motion_off_debounce_seconds
 
+  # Trigger secondo sensore PIR (open space, opzionale)
+  # Se presence_sensor_2 non è configurato, l'entity_id sarà "" e il trigger non si attiverà mai.
+  - platform: state
+    id: motion_on_2
+    entity_id: !input presence_sensor_2
+    to: "on"
+    for:
+      seconds: !input motion_on_debounce_seconds
+
+  - platform: state
+    id: motion_off_2
+    entity_id: !input presence_sensor_2
+    to: "off"
+    for:
+      seconds: !input motion_off_debounce_seconds
+
   # Trigger calo lux: si attiva quando il lux scende sotto la soglia giorno
   # per almeno lux_trigger_stability_seconds. Gestito nell'action con enable_lux_trigger.
   # Nota: il trigger è sempre presente nel blueprint; la logica enable_lux_trigger
@@ -598,6 +629,8 @@ trigger:
 
 variables:
   presence_sensor: !input presence_sensor
+  presence_sensor_2: !input presence_sensor_2
+  has_presence_sensor_2: "{{ presence_sensor_2 | string | length > 0 }}"
   mmwave_sensor: !input mmwave_sensor
   enable_mmwave_timeout: !input enable_mmwave_timeout
   mmwave_keep_on_timeout_seconds: !input mmwave_keep_on_timeout_seconds
@@ -834,10 +867,10 @@ variables:
 
 action:
   - choose:
-      # 1) Rilevamento presenza (PIR ON) -> logica accensione
+      # 1) Rilevamento presenza (PIR ON, da sensore 1 o 2) -> logica accensione
       - conditions:
           - condition: template
-            value_template: "{{ trigger.id == 'motion_on' }}"
+            value_template: "{{ trigger.id in ['motion_on', 'motion_on_2'] }}"
           - condition: template
             value_template: "{{ automation_enabled }}"
           - condition: template
@@ -899,7 +932,9 @@ action:
           - condition: template
             value_template: "{{ not override_active }}"
           - condition: template
-            value_template: "{{ is_state(presence_sensor, 'on') }}"
+            value_template: >-
+              {{ is_state(presence_sensor, 'on') or
+                 (has_presence_sensor_2 | bool(false) and is_state(presence_sensor_2, 'on')) }}
           - condition: template
             value_template: "{{ enough_time_since_last_run }}"
           - condition: template
@@ -947,22 +982,26 @@ action:
       # Con mode=restart, il trigger lux può interrompere un conto alla rovescia in corso.
       # Questo handler garantisce che le luci vengano comunque spente se la stanza è vuota.
       # Non esegue se il trigger lux è usato per accendere (caso 2) né se c'è presenza (PIR ON).
+      # Open space: si attiva solo se ENTRAMBI i sensori sono liberi (nessuna presenza).
       - conditions:
           - condition: template
             value_template: "{{ trigger.id == 'lux_below_threshold' }}"
           - condition: template
             value_template: "{{ automation_enabled }}"
           - condition: template
-            value_template: "{{ is_state(presence_sensor, 'off') }}"
+            value_template: >-
+              {{ is_state(presence_sensor, 'off') and
+                 (not (has_presence_sensor_2 | bool(false)) or is_state(presence_sensor_2, 'off')) }}
         sequence:
           # Breve attesa di sicurezza prima di spegnere (max 60s o timeout attivo, il minore)
           - delay:
               seconds: >-
                 {{ [active_timeout | int(60), 60] | min }}
-          # Ricontrolla assenza e override prima di spegnere
-          - condition: state
-            entity_id: !input presence_sensor
-            state: "off"
+          # Ricontrolla assenza e override prima di spegnere (entrambi i sensori devono essere liberi)
+          - condition: template
+            value_template: >-
+              {{ is_state(presence_sensor, 'off') and
+                 (not (has_presence_sensor_2 | bool(false)) or is_state(presence_sensor_2, 'off')) }}
           - condition: template
             value_template: >-
               {{ (not ((manual_override_helper | string | length > 0) and is_state(manual_override_helper, 'on')))
@@ -972,10 +1011,11 @@ action:
             data:
               transition: "{{ off_transition_seconds | int(0) }}"
 
-      # 4) Rilevamento assenza (PIR OFF) -> logica spegnimento (mai legata ai lux)
+      # 4) Rilevamento assenza (PIR OFF, da sensore 1 o 2) -> logica spegnimento (mai legata ai lux)
+      # Open space: lo spegnimento avviene solo se entrambi i sensori sono liberi dopo il timeout.
       - conditions:
           - condition: template
-            value_template: "{{ trigger.id == 'motion_off' }}"
+            value_template: "{{ trigger.id in ['motion_off', 'motion_off_2'] }}"
           - condition: template
             value_template: "{{ automation_enabled }}"
           - condition: template
@@ -1003,9 +1043,11 @@ action:
                             continue_on_timeout: true
                     default:
                       - wait_template: "{{ is_state(mmwave_sensor, 'off') }}"
-          - condition: state
-            entity_id: !input presence_sensor
-            state: "off"
+          # Open space: verifica che ENTRAMBI i sensori siano liberi prima di procedere allo spegnimento
+          - condition: template
+            value_template: >-
+              {{ is_state(presence_sensor, 'off') and
+                 (not (has_presence_sensor_2 | bool(false)) or is_state(presence_sensor_2, 'off')) }}
           - condition: template
             value_template: >-
               {{ (not ((manual_override_helper | string | length > 0) and is_state(manual_override_helper, 'on')))
@@ -1025,10 +1067,11 @@ action:
                       transition: "{{ off_transition_seconds | int(0) }}"
                   - delay:
                       seconds: "{{ pre_off_dim_duration_seconds | int(15) }}"
-                  # Ricontrolla assenza PIR dopo la fase di avviso
-                  - condition: state
-                    entity_id: !input presence_sensor
-                    state: "off"
+                  # Ricontrolla assenza di ENTRAMBI i sensori dopo la fase di avviso
+                  - condition: template
+                    value_template: >-
+                      {{ is_state(presence_sensor, 'off') and
+                         (not (has_presence_sensor_2 | bool(false)) or is_state(presence_sensor_2, 'off')) }}
           # Ricontrolla mmWave dopo il pre-spegnimento: se è diventato attivo durante il dimming
           # (senza che il PIR si sia riattivato), attende nuovamente che si liberi prima di spegnere.
           - choose:
