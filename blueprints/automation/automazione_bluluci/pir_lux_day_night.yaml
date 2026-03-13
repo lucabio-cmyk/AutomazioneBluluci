@@ -1,29 +1,29 @@
 blueprint:
-  name: "Auto Luci PIR + mmWave + Lux (Giorno/Notte) - Robusto"
+  name: "Auto Luci Movimento + mmWave + Lux (Giorno/Notte) - Robusto"
   description: >-
-    Blueprint professionale per accensione/spegnimento luci basato su presenza PIR e luminosità,
+    Blueprint professionale per accensione/spegnimento luci basato su sensori di movimento e luminosità,
     con profili giorno/notte, override manuale, debounce, fallback sensori e supporto multi-luce.
-    Supporto opzionale sensore mmWave (radar) per mantenere la luce accesa quando viene rilevata
-    presenza stazionaria anche dopo che il PIR non rileva più movimento.
+    Supporto opzionale fino a due sensori mmWave (radar) per mantenere la luce accesa quando viene rilevata
+    presenza stazionaria anche dopo che il sensore di movimento non rileva più attività.
     Novità: rilevamento notte tramite sensore lux esterno (crepuscolare), trigger automatico al calo
     di lux con presenza rilevata, dissolvenza pre-spegnimento e transizione morbida allo spegnimento.
-    Open space: supporto secondo sensore PIR (es. sala + cucina) — logica OR all'accensione,
+    Open space: supporto secondo sensore di movimento (es. sala + cucina) — logica OR all'accensione,
     AND allo spegnimento (entrambi i sensori devono essere liberi prima di spegnere le luci).
   domain: automation
   source_url: https://raw.githubusercontent.com/lucabio-cmyk/AutomazioneBluluci/main/blueprints/automation/automazione_bluluci/pir_lux_day_night.yaml
 
   input:
     presence_sensor:
-      name: Sensore presenza (PIR)
+      name: Sensore di movimento 1
       description: Binary sensor che indica movimento/presenza (on/off).
       selector:
         entity:
           domain: binary_sensor
 
     presence_sensor_2:
-      name: Secondo sensore presenza (opzionale, open space)
+      name: Sensore di movimento 2 (opzionale, open space)
       description: >-
-        Secondo sensore PIR per ambienti open space (es. sala + cucina collegati).
+        Secondo sensore di movimento per ambienti open space (es. sala + cucina collegati).
         Se configurato, la logica diventa OR all'accensione (basta uno dei due sensori per
         accendere le luci) e AND allo spegnimento (entrambi devono essere liberi prima di
         avviare il conto alla rovescia per lo spegnimento).
@@ -34,12 +34,25 @@ blueprint:
           domain: binary_sensor
 
     mmwave_sensor:
-      name: Sensore presenza mmWave / radar (opzionale)
+      name: Sensore mmWave / radar 1 (opzionale)
       description: >-
         Sensore radar mmWave (es. HLK-LD2410, LD2450, Tuya mmWave) per rilevamento
         presenza stazionaria. Se configurato, impedisce lo spegnimento automatico
-        finché rileva presenza, anche quando il PIR non rileva più movimento.
+        finché rileva presenza, anche quando il sensore di movimento non rileva più attività.
         Lascia vuoto se non hai un sensore mmWave.
+      default: ""
+      selector:
+        entity:
+          domain: binary_sensor
+
+    mmwave_sensor_2:
+      name: Sensore mmWave / radar 2 (opzionale)
+      description: >-
+        Secondo sensore radar mmWave per ambienti open space o copertura estesa.
+        Se configurato, usa logica OR per mantenere le luci accese (basta uno dei due sensori
+        mmWave attivo per impedire lo spegnimento) e AND per consentire lo spegnimento
+        (entrambi devono essere liberi prima di procedere).
+        Lascia vuoto se hai un solo sensore mmWave.
       default: ""
       selector:
         entity:
@@ -49,7 +62,7 @@ blueprint:
       name: Abilita timeout massimo mmWave (opzionale)
       description: >-
         Se attivo, applica un timeout massimo di sicurezza al mantenimento luce tramite mmWave.
-        Se disattivato, la luce resta accesa indefinitamente finché il sensore mmWave rileva presenza.
+        Se disattivato, la luce resta accesa indefinitamente finché almeno un sensore mmWave rileva presenza.
       default: true
       selector:
         boolean: {}
@@ -57,8 +70,8 @@ blueprint:
     mmwave_keep_on_timeout_seconds:
       name: Timeout massimo mantenimento luce mmWave (s)
       description: >-
-        Tempo massimo aggiuntivo (dopo il timeout base assenza PIR) per cui la luce
-        resta accesa se il sensore mmWave rileva ancora presenza.
+        Tempo massimo aggiuntivo (dopo il timeout base assenza movimento) per cui la luce
+        resta accesa se uno o entrambi i sensori mmWave rilevano ancora presenza.
         Allo scadere di questo timeout la luce si spegne comunque (sicurezza anti-blocco).
         Ignorato se "Abilita timeout massimo mmWave" è disattivato.
       default: 600
@@ -600,7 +613,7 @@ trigger:
     for:
       seconds: !input motion_off_debounce_seconds
 
-  # Trigger secondo sensore PIR (open space, opzionale)
+  # Trigger secondo sensore di movimento (open space, opzionale)
   # Se presence_sensor_2 non è configurato, l'entity_id sarà "" e il trigger non si attiverà mai.
   - platform: state
     id: motion_on_2
@@ -632,9 +645,14 @@ variables:
   presence_sensor_2: !input presence_sensor_2
   has_presence_sensor_2: "{{ presence_sensor_2 | string | length > 0 }}"
   mmwave_sensor: !input mmwave_sensor
+  mmwave_sensor_2: !input mmwave_sensor_2
   enable_mmwave_timeout: !input enable_mmwave_timeout
   mmwave_keep_on_timeout_seconds: !input mmwave_keep_on_timeout_seconds
   has_mmwave: "{{ mmwave_sensor | string | length > 0 }}"
+  has_mmwave_2: "{{ mmwave_sensor_2 | string | length > 0 }}"
+  any_mmwave_on: >-
+    {{ (has_mmwave | bool(false) and is_state(mmwave_sensor, 'on')) or
+       (has_mmwave_2 | bool(false) and is_state(mmwave_sensor_2, 'on')) }}
   lux_sensor: !input lux_sensor
   twilight_sensor: !input twilight_sensor
   has_twilight_sensor: "{{ twilight_sensor | string | length > 0 }}"
@@ -867,7 +885,7 @@ variables:
 
 action:
   - choose:
-      # 1) Rilevamento presenza (PIR ON, da sensore 1 o 2) -> logica accensione
+      # 1) Rilevamento presenza (movimento ON, da sensore 1 o 2) -> logica accensione
       - conditions:
           - condition: template
             value_template: "{{ trigger.id in ['motion_on', 'motion_on_2'] }}"
@@ -1011,8 +1029,8 @@ action:
             data:
               transition: "{{ off_transition_seconds | int(0) }}"
 
-      # 4) Rilevamento assenza (PIR OFF, da sensore 1 o 2) -> logica spegnimento (mai legata ai lux)
-      # Open space: lo spegnimento avviene solo se entrambi i sensori sono liberi dopo il timeout.
+      # 4) Rilevamento assenza (movimento OFF, da sensore 1 o 2) -> logica spegnimento (mai legata ai lux)
+      # Open space: lo spegnimento avviene solo se entrambi i sensori di movimento sono liberi dopo il timeout.
       - conditions:
           - condition: template
             value_template: "{{ trigger.id in ['motion_off', 'motion_off_2'] }}"
@@ -1024,25 +1042,30 @@ action:
         sequence:
           - delay:
               seconds: "{{ active_timeout | int(0) }}"
-          # Se mmWave è configurato e rileva ancora presenza, attendi che si liberi.
-          # Se enable_mmwave_timeout è attivo, applica il timeout massimo di sicurezza anti-blocco;
-          # altrimenti attende indefinitamente finché il sensore mmWave rileva presenza.
+          # Se uno o entrambi i sensori mmWave rilevano presenza, attendi che si liberino tutti.
+          # Logica OR: basta che uno dei due mmWave sia attivo per mantenere la luce accesa.
+          # Logica AND: entrambi devono essere liberi prima di procedere allo spegnimento.
+          # Se enable_mmwave_timeout è attivo, applica un timeout massimo di sicurezza anti-blocco.
           - choose:
               - conditions:
                   - condition: template
-                    value_template: "{{ has_mmwave and is_state(mmwave_sensor, 'on') }}"
+                    value_template: "{{ any_mmwave_on | bool(false) }}"
                 sequence:
                   - choose:
                       - conditions:
                           - condition: template
                             value_template: "{{ enable_mmwave_timeout | bool(true) }}"
                         sequence:
-                          - wait_template: "{{ is_state(mmwave_sensor, 'off') }}"
+                          - wait_template: >-
+                              {{ (not has_mmwave or is_state(mmwave_sensor, 'off')) and
+                                 (not has_mmwave_2 or is_state(mmwave_sensor_2, 'off')) }}
                             timeout:
                               seconds: "{{ mmwave_keep_on_timeout_seconds | int(600) }}"
                             continue_on_timeout: true
                     default:
-                      - wait_template: "{{ is_state(mmwave_sensor, 'off') }}"
+                      - wait_template: >-
+                          {{ (not has_mmwave or is_state(mmwave_sensor, 'off')) and
+                             (not has_mmwave_2 or is_state(mmwave_sensor_2, 'off')) }}
           # Open space: verifica che ENTRAMBI i sensori siano liberi prima di procedere allo spegnimento
           - condition: template
             value_template: >-
@@ -1072,24 +1095,28 @@ action:
                     value_template: >-
                       {{ is_state(presence_sensor, 'off') and
                          (not (has_presence_sensor_2 | bool(false)) or is_state(presence_sensor_2, 'off')) }}
-          # Ricontrolla mmWave dopo il pre-spegnimento: se è diventato attivo durante il dimming
-          # (senza che il PIR si sia riattivato), attende nuovamente che si liberi prima di spegnere.
+          # Ricontrolla mmWave dopo il pre-spegnimento: se uno dei sensori è diventato attivo durante il dimming
+          # (senza che il sensore di movimento si sia riattivato), attende che entrambi si liberino prima di spegnere.
           - choose:
               - conditions:
                   - condition: template
-                    value_template: "{{ has_mmwave and is_state(mmwave_sensor, 'on') }}"
+                    value_template: "{{ any_mmwave_on | bool(false) }}"
                 sequence:
                   - choose:
                       - conditions:
                           - condition: template
                             value_template: "{{ enable_mmwave_timeout | bool(true) }}"
                         sequence:
-                          - wait_template: "{{ is_state(mmwave_sensor, 'off') }}"
+                          - wait_template: >-
+                              {{ (not has_mmwave or is_state(mmwave_sensor, 'off')) and
+                                 (not has_mmwave_2 or is_state(mmwave_sensor_2, 'off')) }}
                             timeout:
                               seconds: "{{ mmwave_keep_on_timeout_seconds | int(600) }}"
                             continue_on_timeout: true
                     default:
-                      - wait_template: "{{ is_state(mmwave_sensor, 'off') }}"
+                      - wait_template: >-
+                          {{ (not has_mmwave or is_state(mmwave_sensor, 'off')) and
+                             (not has_mmwave_2 or is_state(mmwave_sensor_2, 'off')) }}
           # Spegnimento definitivo con transizione morbida
           - service: light.turn_off
             target: !input light_target
