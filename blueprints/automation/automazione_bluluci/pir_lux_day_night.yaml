@@ -886,6 +886,10 @@ variables:
 action:
   - choose:
       # 1) Rilevamento presenza (movimento ON, da sensore 1 o 2) -> logica accensione
+      # Nota: enough_time_since_last_run NON è usato qui perché con mode: restart, quando
+      # il trigger motion_on interrompe un countdown motion_off, last_triggered viene
+      # aggiornato a "adesso" da HA prima che l'action inizi, causando un falso blocco.
+      # Il debounce del trigger (for: motion_on_debounce_seconds) è sufficiente per filtrare i glitch PIR.
       - conditions:
           - condition: template
             value_template: "{{ trigger.id in ['motion_on', 'motion_on_2'] }}"
@@ -893,8 +897,6 @@ action:
             value_template: "{{ automation_enabled }}"
           - condition: template
             value_template: "{{ not override_active }}"
-          - condition: template
-            value_template: "{{ enough_time_since_last_run }}"
           - condition: template
             value_template: >-
               {{ (not skip_if_light_already_on) or
