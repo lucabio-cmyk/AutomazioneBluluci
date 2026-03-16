@@ -494,6 +494,36 @@ blueprint:
           mode: slider
           unit_of_measurement: min
 
+    enable_circadian_periodic_update:
+      name: Abilita aggiornamento circadiano periodico (transizione continua)
+      description: >-
+        Se attivo, mentre la luce è accesa invia un aggiornamento circadiano ogni
+        N minuti, ricalcolando la temperatura colore in base all'elevazione solare
+        corrente. La transizione HA ha la stessa durata dell'intervallo: la luce
+        segue il sole in modo continuo e senza salti visibili.
+        Con mode=restart, il loop si interrompe automaticamente al trigger di assenza
+        (motion_off), che gestisce lo spegnimento senza interferenze.
+        Richiede "Abilita temperatura colore circadiana" attivo.
+      default: false
+      selector:
+        boolean: {}
+
+    circadian_update_interval_minutes:
+      name: Intervallo aggiornamento circadiano (min)
+      description: >-
+        Ogni quanti minuti viene aggiornata la temperatura colore mentre la luce
+        è accesa. La transizione HA ha la stessa durata dell'intervallo: con 5 min
+        la luce varia in modo continuo senza salti. Valori bassi = più fluido ma
+        più comandi inviati alla luce. Consigliato: 5 min.
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 30
+          step: 1
+          mode: slider
+          unit_of_measurement: min
+
     solar_elevation_entity:
       name: Entità elevazione solare
       description: >-
@@ -866,6 +896,8 @@ variables:
   morning_color_temp_kelvin: !input morning_color_temp_kelvin
   evening_color_temp_kelvin: !input evening_color_temp_kelvin
   circadian_transition_minutes: !input circadian_transition_minutes
+  enable_circadian_periodic_update: !input enable_circadian_periodic_update
+  circadian_update_interval_minutes: !input circadian_update_interval_minutes
   solar_elevation_entity: !input solar_elevation_entity
 
   # Temperatura colore attiva: se circadiana abilitata, segue una curva continua multi-fase
@@ -1029,6 +1061,94 @@ action:
                     data:
                       brightness_pct: "{{ active_brightness | int(100) }}"
                       transition: "{{ active_transition | int(0) }}"
+          # Aggiornamento circadiano periodico: loop attivo mentre la luce è accesa.
+          # Ogni N minuti ri-calcola la temperatura colore con l'elevazione solare corrente
+          # e la invia alla luce con una transizione = intervallo (continuità perfetta).
+          # Con mode=restart il loop viene interrotto automaticamente dal trigger motion_off,
+          # che gestisce il countdown di spegnimento senza interferenze.
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >-
+                      {{ (brightness_mode != 'scene_control')
+                         and (enable_color_temp | bool(false))
+                         and (enable_circadian_color_temp | bool(false))
+                         and (enable_circadian_periodic_update | bool(false)) }}
+                sequence:
+                  - repeat:
+                      while:
+                        - condition: template
+                          value_template: >-
+                            {{ expand(light_target.entity_id) | selectattr('state', 'eq', 'on') | list | count > 0 }}
+                      sequence:
+                        - delay:
+                            minutes: "{{ circadian_update_interval_minutes | int(5) }}"
+                        - condition: template
+                          value_template: >-
+                            {{ expand(light_target.entity_id) | selectattr('state', 'eq', 'on') | list | count > 0
+                               and not ((manual_override_helper | string | length > 0) and is_state(manual_override_helper, 'on')) }}
+                        - service: light.turn_on
+                          target: !input light_target
+                          data:
+                            color_temp_kelvin: >-
+                              {%- set day_k   = day_color_temp_kelvin   | int(4000) -%}
+                              {%- set night_k = night_color_temp_kelvin | int(2700) -%}
+                              {%- set morning_k_raw = morning_color_temp_kelvin | int(0) -%}
+                              {%- set morning_k = morning_k_raw if morning_k_raw > 0 else day_k -%}
+                              {%- set evening_k_raw = evening_color_temp_kelvin | int(0) -%}
+                              {%- set evening_k = evening_k_raw if evening_k_raw > 0 else day_k -%}
+                              {%- set elev = states(solar_elevation_entity) | float(0) -%}
+                              {%- set noon_k_raw = noon_color_temp_kelvin | int(0) -%}
+                              {%- set noon_k = noon_k_raw if noon_k_raw > day_k else day_k -%}
+                              {%- set sun_rising = state_attr('sun.sun', 'rising') | bool(true) -%}
+                              {%- set e_night = -6.0 -%}
+                              {%- set e_gold  =  6.0 -%}
+                              {%- set e_day   = 25.0 -%}
+                              {%- set e_noon  = 55.0 -%}
+                              {%- if elev <= e_night -%}
+                                {{ night_k }}
+                              {%- elif sun_rising -%}
+                                {%- if elev <= e_gold -%}
+                                  {%- set t = (elev - e_night) / (e_gold - e_night) -%}
+                                  {%- set t = [0.0, [1.0, t] | min] | max -%}
+                                  {%- set s = t * t * (3.0 - 2.0 * t) -%}
+                                  {{ (night_k + (morning_k - night_k) * s) | round | int }}
+                                {%- elif elev <= e_day -%}
+                                  {%- set t = (elev - e_gold) / (e_day - e_gold) -%}
+                                  {%- set t = [0.0, [1.0, t] | min] | max -%}
+                                  {%- set s = t * t * (3.0 - 2.0 * t) -%}
+                                  {{ (morning_k + (day_k - morning_k) * s) | round | int }}
+                                {%- elif noon_k > day_k and elev <= e_noon -%}
+                                  {%- set t = (elev - e_day) / (e_noon - e_day) -%}
+                                  {%- set t = [0.0, [1.0, t] | min] | max -%}
+                                  {%- set s = t * t * (3.0 - 2.0 * t) -%}
+                                  {{ (day_k + (noon_k - day_k) * s) | round | int }}
+                                {%- elif noon_k > day_k -%}
+                                  {{ noon_k }}
+                                {%- else -%}
+                                  {{ day_k }}
+                                {%- endif -%}
+                              {%- else -%}
+                                {%- if elev > e_noon -%}
+                                  {{ noon_k }}
+                                {%- elif elev > e_day -%}
+                                  {%- set t = (elev - e_day) / (e_noon - e_day) -%}
+                                  {%- set t = [0.0, [1.0, t] | min] | max -%}
+                                  {%- set s = t * t * (3.0 - 2.0 * t) -%}
+                                  {{ (day_k + (noon_k - day_k) * s) | round | int }}
+                                {%- elif elev > e_gold -%}
+                                  {%- set t = (elev - e_gold) / (e_day - e_gold) -%}
+                                  {%- set t = [0.0, [1.0, t] | min] | max -%}
+                                  {%- set s = t * t * (3.0 - 2.0 * t) -%}
+                                  {{ (evening_k + (day_k - evening_k) * s) | round | int }}
+                                {%- else -%}
+                                  {%- set t = (elev - e_night) / (e_gold - e_night) -%}
+                                  {%- set t = [0.0, [1.0, t] | min] | max -%}
+                                  {%- set s = t * t * (3.0 - 2.0 * t) -%}
+                                  {{ (night_k + (evening_k - night_k) * s) | round | int }}
+                                {%- endif -%}
+                              {%- endif -%}
+                            transition: "{{ (circadian_update_interval_minutes | int(5)) * 60 }}"
 
       # 2) Trigger calo lux + presenza rilevata -> accensione automatica al crepuscolo
       # Si attiva quando la luce esterna scende sotto soglia giorno e qualcuno è già in stanza.
@@ -1091,6 +1211,90 @@ action:
                     data:
                       brightness_pct: "{{ active_brightness | int(100) }}"
                       transition: "{{ active_transition | int(0) }}"
+          # Aggiornamento circadiano periodico: stesso loop del branch motion_on.
+          - choose:
+              - conditions:
+                  - condition: template
+                    value_template: >-
+                      {{ (brightness_mode != 'scene_control')
+                         and (enable_color_temp | bool(false))
+                         and (enable_circadian_color_temp | bool(false))
+                         and (enable_circadian_periodic_update | bool(false)) }}
+                sequence:
+                  - repeat:
+                      while:
+                        - condition: template
+                          value_template: >-
+                            {{ expand(light_target.entity_id) | selectattr('state', 'eq', 'on') | list | count > 0 }}
+                      sequence:
+                        - delay:
+                            minutes: "{{ circadian_update_interval_minutes | int(5) }}"
+                        - condition: template
+                          value_template: >-
+                            {{ expand(light_target.entity_id) | selectattr('state', 'eq', 'on') | list | count > 0
+                               and not ((manual_override_helper | string | length > 0) and is_state(manual_override_helper, 'on')) }}
+                        - service: light.turn_on
+                          target: !input light_target
+                          data:
+                            color_temp_kelvin: >-
+                              {%- set day_k   = day_color_temp_kelvin   | int(4000) -%}
+                              {%- set night_k = night_color_temp_kelvin | int(2700) -%}
+                              {%- set morning_k_raw = morning_color_temp_kelvin | int(0) -%}
+                              {%- set morning_k = morning_k_raw if morning_k_raw > 0 else day_k -%}
+                              {%- set evening_k_raw = evening_color_temp_kelvin | int(0) -%}
+                              {%- set evening_k = evening_k_raw if evening_k_raw > 0 else day_k -%}
+                              {%- set elev = states(solar_elevation_entity) | float(0) -%}
+                              {%- set noon_k_raw = noon_color_temp_kelvin | int(0) -%}
+                              {%- set noon_k = noon_k_raw if noon_k_raw > day_k else day_k -%}
+                              {%- set sun_rising = state_attr('sun.sun', 'rising') | bool(true) -%}
+                              {%- set e_night = -6.0 -%}
+                              {%- set e_gold  =  6.0 -%}
+                              {%- set e_day   = 25.0 -%}
+                              {%- set e_noon  = 55.0 -%}
+                              {%- if elev <= e_night -%}
+                                {{ night_k }}
+                              {%- elif sun_rising -%}
+                                {%- if elev <= e_gold -%}
+                                  {%- set t = (elev - e_night) / (e_gold - e_night) -%}
+                                  {%- set t = [0.0, [1.0, t] | min] | max -%}
+                                  {%- set s = t * t * (3.0 - 2.0 * t) -%}
+                                  {{ (night_k + (morning_k - night_k) * s) | round | int }}
+                                {%- elif elev <= e_day -%}
+                                  {%- set t = (elev - e_gold) / (e_day - e_gold) -%}
+                                  {%- set t = [0.0, [1.0, t] | min] | max -%}
+                                  {%- set s = t * t * (3.0 - 2.0 * t) -%}
+                                  {{ (morning_k + (day_k - morning_k) * s) | round | int }}
+                                {%- elif noon_k > day_k and elev <= e_noon -%}
+                                  {%- set t = (elev - e_day) / (e_noon - e_day) -%}
+                                  {%- set t = [0.0, [1.0, t] | min] | max -%}
+                                  {%- set s = t * t * (3.0 - 2.0 * t) -%}
+                                  {{ (day_k + (noon_k - day_k) * s) | round | int }}
+                                {%- elif noon_k > day_k -%}
+                                  {{ noon_k }}
+                                {%- else -%}
+                                  {{ day_k }}
+                                {%- endif -%}
+                              {%- else -%}
+                                {%- if elev > e_noon -%}
+                                  {{ noon_k }}
+                                {%- elif elev > e_day -%}
+                                  {%- set t = (elev - e_day) / (e_noon - e_day) -%}
+                                  {%- set t = [0.0, [1.0, t] | min] | max -%}
+                                  {%- set s = t * t * (3.0 - 2.0 * t) -%}
+                                  {{ (day_k + (noon_k - day_k) * s) | round | int }}
+                                {%- elif elev > e_gold -%}
+                                  {%- set t = (elev - e_gold) / (e_day - e_gold) -%}
+                                  {%- set t = [0.0, [1.0, t] | min] | max -%}
+                                  {%- set s = t * t * (3.0 - 2.0 * t) -%}
+                                  {{ (evening_k + (day_k - evening_k) * s) | round | int }}
+                                {%- else -%}
+                                  {%- set t = (elev - e_night) / (e_gold - e_night) -%}
+                                  {%- set t = [0.0, [1.0, t] | min] | max -%}
+                                  {%- set s = t * t * (3.0 - 2.0 * t) -%}
+                                  {{ (night_k + (evening_k - night_k) * s) | round | int }}
+                                {%- endif -%}
+                              {%- endif -%}
+                            transition: "{{ (circadian_update_interval_minutes | int(5)) * 60 }}"
 
       # 3) Trigger calo lux con ASSENZA rilevata -> ripristino sicuro del timer di spegnimento
       # Con mode=restart, il trigger lux può interrompere un conto alla rovescia in corso.
