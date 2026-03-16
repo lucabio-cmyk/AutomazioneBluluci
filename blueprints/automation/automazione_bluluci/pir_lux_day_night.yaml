@@ -445,6 +445,55 @@ blueprint:
           mode: slider
           unit_of_measurement: K
 
+    morning_color_temp_kelvin:
+      name: Temperatura colore mattina (K)
+      description: >-
+        Temperatura del bianco nella fase mattutina, quando il sole è in salita
+        (da ~6° a ~25° di elevazione). Valori tipici: 3000–3800K (bianco leggermente caldo).
+        Se impostato a 0, usa la temperatura giorno anche di mattina.
+        Richiede "Abilita temperatura colore circadiana" attivo.
+      default: 3500
+      selector:
+        number:
+          min: 0
+          max: 6500
+          step: 100
+          mode: slider
+          unit_of_measurement: K
+
+    evening_color_temp_kelvin:
+      name: Temperatura colore sera (K)
+      description: >-
+        Temperatura del bianco nella fase serale, quando il sole è in discesa
+        (da ~25° a ~6° di elevazione). Valori tipici: 2800–3500K (bianco caldo/ambra).
+        Se impostato a 0, usa la temperatura giorno anche di sera.
+        Richiede "Abilita temperatura colore circadiana" attivo.
+      default: 3000
+      selector:
+        number:
+          min: 0
+          max: 6500
+          step: 100
+          mode: slider
+          unit_of_measurement: K
+
+    circadian_transition_minutes:
+      name: Durata transizione colore circadiana (min)
+      description: >-
+        Durata in minuti della transizione morbida al momento dell'accensione,
+        quando la modalità circadiana è attiva. Permette alla luce di raggiungere
+        gradualmente la temperatura colore target mattina/sera anziché cambiare
+        istantaneamente. Con 0, usa la transizione di accensione normale (giorno/notte).
+        Esempio: 5 min = la luce impiega 5 minuti a raggiungere il bianco circadiano.
+      default: 5
+      selector:
+        number:
+          min: 0
+          max: 60
+          step: 1
+          mode: slider
+          unit_of_measurement: min
+
     solar_elevation_entity:
       name: Entità elevazione solare
       description: >-
@@ -798,24 +847,47 @@ variables:
     {%- endif -%}
   active_transition: "{{ night_transition_seconds if is_night | bool else day_transition_seconds }}"
   active_timeout: "{{ night_no_motion_timeout_seconds if is_night | bool else day_no_motion_timeout_seconds }}"
+  # Transizione colore circadiana: se la modalità circadiana è attiva e circadian_transition_minutes > 0,
+  # usa una transizione più lunga per far raggiungere gradualmente alla luce la temperatura target.
+  # Altrimenti usa la transizione di accensione normale (active_transition).
+  active_color_transition: >-
+    {%- if enable_color_temp | bool(false) and enable_circadian_color_temp | bool(false)
+           and (circadian_transition_minutes | int(0)) > 0 -%}
+      {{ circadian_transition_minutes | int(0) * 60 }}
+    {%- else -%}
+      {{ active_transition }}
+    {%- endif -%}
 
   enable_color_temp: !input enable_color_temp
   day_color_temp_kelvin: !input day_color_temp_kelvin
   night_color_temp_kelvin: !input night_color_temp_kelvin
   enable_circadian_color_temp: !input enable_circadian_color_temp
   noon_color_temp_kelvin: !input noon_color_temp_kelvin
+  morning_color_temp_kelvin: !input morning_color_temp_kelvin
+  evening_color_temp_kelvin: !input evening_color_temp_kelvin
+  circadian_transition_minutes: !input circadian_transition_minutes
   solar_elevation_entity: !input solar_elevation_entity
 
   # Temperatura colore attiva: se circadiana abilitata, segue una curva continua multi-fase
   # basata sull'elevazione solare letta dall'entità solar_elevation_entity.
   # Smoothstep cubico s(t)=t²·(3−2t) per transizioni naturali senza salti di derivata.
   #
-  # Fasi dell'elevazione:
-  #   ≤ −6°          (notte / crepuscolo civile):    night_k costante
-  #   −6° →  6°      (ora d'oro, alba/tramonto):     night_k → k_gold  (≈ +30% del range)
-  #    6° → 25°      (mattina / sera):               k_gold  → day_k
-  #   25° → 55°      (mezzogiorno, se noon_k>day_k): day_k   → noon_k  [segmento opzionale]
-  #   > 55°          (sole molto alto):              noon_k costante
+  # La curva distingue la fase MATTUTINA (sole in salita) da quella SERALE (sole in discesa)
+  # tramite state_attr('sun.sun','rising'), consentendo temperature diverse nei due momenti.
+  #
+  # Fase MATTUTINA (sun.rising = true):
+  #   ≤ −6°          notte costante (night_k)
+  #   −6° →  6°      alba:       night_k   → morning_k   [ora d'oro]
+  #    6° → 25°      mattina:    morning_k → day_k
+  #   25° → 55°      picco:      day_k     → noon_k       [opzionale, se noon_k > day_k]
+  #   > 55°          mezzogiorno costante (noon_k o day_k)
+  #
+  # Fase SERALE (sun.rising = false):
+  #   > 55°          picco costante (noon_k o day_k)
+  #   55° → 25°      pomeriggio: noon_k    → day_k        [opzionale]
+  #   25° →  6°      sera:       day_k     → evening_k
+  #    6° → −6°      tramonto:   evening_k → night_k      [ora d'oro serale]
+  #   ≤ −6°          notte costante (night_k)
   active_color_temp: >-
     {%- set day_k   = day_color_temp_kelvin   | int(4000) -%}
     {%- set night_k = night_color_temp_kelvin | int(2700) -%}
@@ -823,51 +895,79 @@ variables:
       {{ night_k if is_night | bool else day_k }}
     {%- else -%}
       {#
-        Curva circadiana multi-fase basata sull'elevazione solare.
-        k_gold = night_k + 30% × (day_k − night_k)   [punto di controllo ora d'oro]
-        Smoothstep cubico: s(t) = t² × (3 − 2t)       [curva S, derivate continue in 0 e 1]
+        Curva circadiana multi-fase con fasi mattina/sera distinte.
+        morning_k / evening_k: temperature target nelle rispettive fasi (0 = usa day_k).
+        noon_k: picco facoltativo a mezzogiorno (0 = rimane a day_k).
+        Smoothstep cubico: s(t) = t² × (3 − 2t)   [curva S, derivate continue in 0 e 1]
 
-        Esempio con night_k=2700K, day_k=4000K, noon_k=5500K (facoltativo):
-          elevazione  −6°:  2700 K  (piena notte)
-          elevazione   0°:  2895 K  (alba, ancora caldo)
-          elevazione   6°:  3090 K  (fine ora d'oro)
-          elevazione  15°:  3630 K  (metà mattinata)
-          elevazione  25°:  4000 K  (pieno giorno)
-          elevazione  40°:  4875 K  (mezzogiorno, se noon_k=5500K)
-          elevazione  55°:  5500 K  (picco solare)
+        Esempio con night_k=2700K, morning_k=3500K, day_k=4000K, evening_k=3000K, noon_k=5500K:
+          Mattina:   −6°→2700K  0°→~2895K  6°→3500K  15°→3750K  25°→4000K  55°→5500K
+          Sera:      55°→5500K  25°→4000K  15°→3500K   6°→3000K   0°→~2850K  −6°→2700K
       #}
-      {%- set elev   = states(solar_elevation_entity) | float(0) -%}
-      {%- set noon_k = noon_color_temp_kelvin | int(0) -%}
-      {%- set noon_k = noon_k if noon_k > day_k else day_k -%}
+      {%- set morning_k_raw = morning_color_temp_kelvin | int(0) -%}
+      {%- set morning_k = morning_k_raw if morning_k_raw > 0 else day_k -%}
+      {%- set evening_k_raw = evening_color_temp_kelvin | int(0) -%}
+      {%- set evening_k = evening_k_raw if evening_k_raw > 0 else day_k -%}
+      {%- set elev      = states(solar_elevation_entity) | float(0) -%}
+      {%- set noon_k    = noon_color_temp_kelvin | int(0) -%}
+      {%- set noon_k    = noon_k if noon_k > day_k else day_k -%}
+      {%- set sun_rising = state_attr('sun.sun', 'rising') | bool(true) -%}
       {%- set e_night = -6.0 -%}
       {%- set e_gold  =  6.0 -%}
       {%- set e_day   = 25.0 -%}
       {%- set e_noon  = 55.0 -%}
-      {%- set k_gold  = (night_k + (day_k - night_k) * 0.30) | round | int -%}
       {%- if elev <= e_night -%}
+        {# Piena notte: costante a night_k #}
         {{ night_k }}
-      {%- elif elev <= e_gold -%}
-        {# Segmento 1: crepuscolo civile → fine ora d'oro (−6° → 6°, 12° di escursione) #}
-        {%- set t = (elev - e_night) / (e_gold - e_night) -%}
-        {%- set t = [0.0, [1.0, t] | min] | max -%}
-        {%- set s = t * t * (3.0 - 2.0 * t) -%}
-        {{ (night_k + (k_gold - night_k) * s) | round | int }}
-      {%- elif elev <= e_day -%}
-        {# Segmento 2: fine ora d'oro → pieno giorno (6° → 25°, 19° di escursione) #}
-        {%- set t = (elev - e_gold) / (e_day - e_gold) -%}
-        {%- set t = [0.0, [1.0, t] | min] | max -%}
-        {%- set s = t * t * (3.0 - 2.0 * t) -%}
-        {{ (k_gold + (day_k - k_gold) * s) | round | int }}
-      {%- elif noon_k > day_k and elev <= e_noon -%}
-        {# Segmento 3 (opzionale): pieno giorno → picco mezzogiorno (25° → 55°, 30° di escursione) #}
-        {%- set t = (elev - e_day) / (e_noon - e_day) -%}
-        {%- set t = [0.0, [1.0, t] | min] | max -%}
-        {%- set s = t * t * (3.0 - 2.0 * t) -%}
-        {{ (day_k + (noon_k - day_k) * s) | round | int }}
-      {%- elif noon_k > day_k -%}
-        {{ noon_k }}
+      {%- elif sun_rising -%}
+        {# ── FASE MATTUTINA: sole in salita ── #}
+        {%- if elev <= e_gold -%}
+          {# Alba / ora d'oro: night_k → morning_k  (−6° → 6°) #}
+          {%- set t = (elev - e_night) / (e_gold - e_night) -%}
+          {%- set t = [0.0, [1.0, t] | min] | max -%}
+          {%- set s = t * t * (3.0 - 2.0 * t) -%}
+          {{ (night_k + (morning_k - night_k) * s) | round | int }}
+        {%- elif elev <= e_day -%}
+          {# Mattina: morning_k → day_k  (6° → 25°) #}
+          {%- set t = (elev - e_gold) / (e_day - e_gold) -%}
+          {%- set t = [0.0, [1.0, t] | min] | max -%}
+          {%- set s = t * t * (3.0 - 2.0 * t) -%}
+          {{ (morning_k + (day_k - morning_k) * s) | round | int }}
+        {%- elif noon_k > day_k and elev <= e_noon -%}
+          {# Picco mezzogiorno (opzionale): day_k → noon_k  (25° → 55°) #}
+          {%- set t = (elev - e_day) / (e_noon - e_day) -%}
+          {%- set t = [0.0, [1.0, t] | min] | max -%}
+          {%- set s = t * t * (3.0 - 2.0 * t) -%}
+          {{ (day_k + (noon_k - day_k) * s) | round | int }}
+        {%- elif noon_k > day_k -%}
+          {{ noon_k }}
+        {%- else -%}
+          {{ day_k }}
+        {%- endif -%}
       {%- else -%}
-        {{ day_k }}
+        {# ── FASE SERALE: sole in discesa ── #}
+        {%- if elev > e_noon -%}
+          {# Oltre il picco: costante a noon_k (o day_k se noon non configurato) #}
+          {{ noon_k }}
+        {%- elif elev > e_day -%}
+          {# Pomeriggio: noon_k → day_k  (55° → 25°) #}
+          {%- set t = (elev - e_day) / (e_noon - e_day) -%}
+          {%- set t = [0.0, [1.0, t] | min] | max -%}
+          {%- set s = t * t * (3.0 - 2.0 * t) -%}
+          {{ (day_k + (noon_k - day_k) * s) | round | int }}
+        {%- elif elev > e_gold -%}
+          {# Tardo pomeriggio / sera: day_k → evening_k  (25° → 6°) #}
+          {%- set t = (elev - e_gold) / (e_day - e_gold) -%}
+          {%- set t = [0.0, [1.0, t] | min] | max -%}
+          {%- set s = t * t * (3.0 - 2.0 * t) -%}
+          {{ (evening_k + (day_k - evening_k) * s) | round | int }}
+        {%- else -%}
+          {# Ora d'oro serale / tramonto: evening_k → night_k  (6° → −6°) #}
+          {%- set t = (elev - e_night) / (e_gold - e_night) -%}
+          {%- set t = [0.0, [1.0, t] | min] | max -%}
+          {%- set s = t * t * (3.0 - 2.0 * t) -%}
+          {{ (night_k + (evening_k - night_k) * s) | round | int }}
+        {%- endif -%}
       {%- endif -%}
     {%- endif -%}
 
@@ -921,7 +1021,7 @@ action:
                         target: !input light_target
                         data:
                           brightness_pct: "{{ active_brightness | int(100) }}"
-                          transition: "{{ active_transition | int(0) }}"
+                          transition: "{{ active_color_transition | int(0) }}"
                           color_temp_kelvin: "{{ active_color_temp | int(4000) }}"
                 default:
                   - service: light.turn_on
@@ -983,7 +1083,7 @@ action:
                         target: !input light_target
                         data:
                           brightness_pct: "{{ active_brightness | int(100) }}"
-                          transition: "{{ active_transition | int(0) }}"
+                          transition: "{{ active_color_transition | int(0) }}"
                           color_temp_kelvin: "{{ active_color_temp | int(4000) }}"
                 default:
                   - service: light.turn_on
