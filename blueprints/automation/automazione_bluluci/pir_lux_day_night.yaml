@@ -417,38 +417,17 @@ blueprint:
     enable_circadian_color_temp:
       name: Abilita temperatura colore circadiana (transizione continua)
       description: >-
-        Se attivo, la temperatura colore varia in modo continuo in base alla
-        posizione del sole o all'ora, usando curve smooth invece di passaggi bruschi.
-        - Modalità sole (consigliata): curva multi-fase con smoothstep cubico —
-          notte stabile a night_k, alba/tramonto graduali con effetto ora d'oro,
-          pieno giorno a day_k, picco mezzogiorno opzionale a noon_k.
-        - Modalità oraria: transizione smoothstep centrata su inizio/fine notte
-          (usa il parametro "Durata transizione circadiana").
-        - Modalità lux esterno: curva smooth tra soglia lux giorno e notte.
-        Richiede "Abilita controllo temperatura colore" attivo.
+        Se attivo, la temperatura colore varia in modo continuo seguendo l'elevazione solare
+        letta dall'entità configurata, usando una curva multi-fase con smoothstep cubico:
+        notte stabile a night_k, alba/tramonto graduali con effetto ora d'oro,
+        pieno giorno a day_k, picco mezzogiorno opzionale a noon_k.
+        Richiede "Abilita controllo temperatura colore" attivo e l'entità elevazione solare configurata.
       default: false
       selector:
         boolean: {}
 
-    circadian_transition_minutes:
-      name: Durata transizione circadiana (min) — solo modalità oraria
-      description: >-
-        Durata totale della transizione graduale tra temperatura colore giorno e notte,
-        centrata sull'orario di inizio/fine notte.
-        Esempio: con 60 min e notte alle 22:30, la transizione va da 4000K alle 22:00
-        fino a 2700K alle 23:00, passando per valori intermedi con curva a S.
-        Ignorato in modalità sole e lux (che usano grandezze fisiche continue).
-      default: 60
-      selector:
-        number:
-          min: 10
-          max: 240
-          step: 10
-          mode: slider
-          unit_of_measurement: min
-
     noon_color_temp_kelvin:
-      name: Temperatura colore picco mezzogiorno (K) — solo modalità sole
+      name: Temperatura colore picco mezzogiorno (K)
       description: >-
         Temperatura del bianco al picco di elevazione solare (mezzogiorno).
         Se impostata sopra la temperatura giorno, la luce diventa progressivamente
@@ -457,7 +436,6 @@ blueprint:
         Esempio: day_k=4000K, noon_k=5500K → al massimo del sole si hanno 5500K
         (bianco freddo/luce del giorno), mentre di mattina/sera ~4000K.
         0 = disabilita il picco (la temperatura rimane a day_k durante tutto il giorno).
-        Ignorato in modalità oraria e lux.
       default: 0
       selector:
         number:
@@ -466,6 +444,18 @@ blueprint:
           step: 100
           mode: slider
           unit_of_measurement: K
+
+    solar_elevation_entity:
+      name: Entità elevazione solare
+      description: >-
+        Entità sensore che fornisce il valore dell'elevazione solare in gradi (es. sensor.sun_solar_elevation,
+        oppure l'attributo elevazione di sun.sun tramite un template sensor).
+        Usata per calcolare la temperatura colore circadiana: la curva segue l'elevazione
+        del sole dal valore minimo notturno (night_k) fino al picco di mezzogiorno (noon_k).
+        Richiesto quando "Abilita temperatura colore circadiana" è attivo.
+      selector:
+        entity:
+          domain: sensor
 
     enable_adaptive_brightness:
       name: Abilita luminosità adattiva al lux
@@ -813,48 +803,27 @@ variables:
   day_color_temp_kelvin: !input day_color_temp_kelvin
   night_color_temp_kelvin: !input night_color_temp_kelvin
   enable_circadian_color_temp: !input enable_circadian_color_temp
-  circadian_transition_minutes: !input circadian_transition_minutes
   noon_color_temp_kelvin: !input noon_color_temp_kelvin
+  solar_elevation_entity: !input solar_elevation_entity
 
   # Temperatura colore attiva: se circadiana abilitata, segue una curva continua multi-fase
-  # basata sulla posizione del sole (modalità sole) o sull'orario / lux (altre modalità).
-  # Tutte le interpolazioni usano smoothstep cubico s(t)=t²·(3−2t) per transizioni naturali.
+  # basata sull'elevazione solare letta dall'entità solar_elevation_entity.
+  # Smoothstep cubico s(t)=t²·(3−2t) per transizioni naturali senza salti di derivata.
+  #
+  # Fasi dell'elevazione:
+  #   ≤ −6°          (notte / crepuscolo civile):    night_k costante
+  #   −6° →  6°      (ora d'oro, alba/tramonto):     night_k → k_gold  (≈ +30% del range)
+  #    6° → 25°      (mattina / sera):               k_gold  → day_k
+  #   25° → 55°      (mezzogiorno, se noon_k>day_k): day_k   → noon_k  [segmento opzionale]
+  #   > 55°          (sole molto alto):              noon_k costante
   active_color_temp: >-
     {%- set day_k   = day_color_temp_kelvin   | int(4000) -%}
     {%- set night_k = night_color_temp_kelvin | int(2700) -%}
     {%- if not (enable_circadian_color_temp | bool(false)) -%}
       {{ night_k if is_night | bool else day_k }}
-    {%- elif night_detection_mode == 'lux_based' -%}
+    {%- else -%}
       {#
-        Modalità lux: curva smoothstep cubico tra soglia notte e soglia giorno.
-        Curva a S più naturale rispetto alla precedente interpolazione lineare.
-      #}
-      {%- set lux_val  = twilight_lux | float(999) -%}
-      {%- set lux_high = day_lux_threshold           | float(120) -%}
-      {%- set lux_low  = lux_night_detection_threshold | float(50) -%}
-      {%- if lux_high <= lux_low -%}
-        {{ night_k if is_night | bool else day_k }}
-      {%- elif lux_val >= lux_high -%}
-        {{ day_k }}
-      {%- elif lux_val <= lux_low -%}
-        {{ night_k }}
-      {%- else -%}
-        {%- set t = (lux_val - lux_low) / (lux_high - lux_low) -%}
-        {%- set s = t * t * (3.0 - 2.0 * t) -%}
-        {{ (night_k + (day_k - night_k) * s) | round | int }}
-      {%- endif -%}
-    {%- elif night_detection_mode == 'sun_based' -%}
-      {#
-        Modalità sole: curva circadiana continua multi-fase basata sull'elevazione solare.
-        Quattro segmenti con smoothstep cubico; nessun salto di derivata tra le zone.
-
-        Fasi dell'elevazione:
-          ≤ −6°         (notte / crepuscolo civile):  night_k costante
-          −6° →  6°     (ora d'oro, alba/tramonto):   night_k → k_gold  (≈ +30% del range)
-           6° → 25°     (mattina / sera):              k_gold  → day_k
-          25° → 55°     (mezzogiorno, se noon_k>day_k): day_k → noon_k  [segmento opzionale]
-          > 55°         (sole molto alto):             noon_k costante
-
+        Curva circadiana multi-fase basata sull'elevazione solare.
         k_gold = night_k + 30% × (day_k − night_k)   [punto di controllo ora d'oro]
         Smoothstep cubico: s(t) = t² × (3 − 2t)       [curva S, derivate continue in 0 e 1]
 
@@ -867,7 +836,7 @@ variables:
           elevazione  40°:  4875 K  (mezzogiorno, se noon_k=5500K)
           elevazione  55°:  5500 K  (picco solare)
       #}
-      {%- set elev   = state_attr('sun.sun', 'elevation') | float(0) -%}
+      {%- set elev   = states(solar_elevation_entity) | float(0) -%}
       {%- set noon_k = noon_color_temp_kelvin | int(0) -%}
       {%- set noon_k = noon_k if noon_k > day_k else day_k -%}
       {%- set e_night = -6.0 -%}
@@ -900,55 +869,6 @@ variables:
       {%- else -%}
         {{ day_k }}
       {%- endif -%}
-    {%- else -%}
-      {#
-        Modalità oraria: transizione smoothstep centrata su night_start_time e night_end_time.
-        L'offset firmato indica quanti minuti siamo prima (negativo) o dopo (positivo) il centro
-        della transizione, in un giorno circolare di 1440 minuti.
-        Smoothstep cubico per una curva a S più naturale rispetto alla precedente lineare.
-      #}
-      {%- set trans = [10.0, circadian_transition_minutes | int(60) | float] | max -%}
-      {%- set half = trans / 2.0 -%}
-      {%- set now_min = now().hour * 60.0 + now().minute + now().second / 60.0 -%}
-      {%- set ns_parts = night_start_time.split(':') -%}
-      {%- set ns_min = ns_parts[0] | int * 60.0 + ns_parts[1] | int -%}
-      {%- set ne_parts = night_end_time.split(':') -%}
-      {%- set ne_min = ne_parts[0] | int * 60.0 + ne_parts[1] | int -%}
-      {# Offset firmato dal centro delle due transizioni, in range (−720, 720) minuti #}
-      {%- set dusk_off = ((now_min - ns_min + 720) % 1440) - 720 -%}
-      {%- set dawn_off = ((now_min - ne_min + 720) % 1440) - 720 -%}
-      {%- set in_dusk = dusk_off >= (-half) and dusk_off <= half -%}
-      {%- set in_dawn = dawn_off >= (-half) and dawn_off <= half -%}
-      {%- set ns = namespace(result=0) -%}
-      {%- if in_dusk and not in_dawn -%}
-        {# Zona di transizione serale (tramonto): da bianco freddo a bianco caldo #}
-        {%- set ratio = [0.0, [1.0, (dusk_off + half) / trans] | min] | max -%}
-        {%- set smooth = ratio * ratio * (3.0 - 2.0 * ratio) -%}
-        {%- set ns.result = (day_k + (night_k - day_k) * smooth) | round | int -%}
-      {%- elif in_dawn and not in_dusk -%}
-        {# Zona di transizione mattutina (alba): da bianco caldo a bianco freddo #}
-        {%- set ratio = [0.0, [1.0, (dawn_off + half) / trans] | min] | max -%}
-        {%- set smooth = ratio * ratio * (3.0 - 2.0 * ratio) -%}
-        {%- set ns.result = (night_k + (day_k - night_k) * smooth) | round | int -%}
-      {%- elif in_dusk -%}
-        {# Sovrapposizione (notte brevissima): priorità alla transizione più vicina al centro #}
-        {%- set dusk_abs = dusk_off if dusk_off >= 0 else -dusk_off -%}
-        {%- set dawn_abs = dawn_off if dawn_off >= 0 else -dawn_off -%}
-        {%- if dusk_abs <= dawn_abs -%}
-          {%- set ratio = [0.0, [1.0, (dusk_off + half) / trans] | min] | max -%}
-          {%- set smooth = ratio * ratio * (3.0 - 2.0 * ratio) -%}
-          {%- set ns.result = (day_k + (night_k - day_k) * smooth) | round | int -%}
-        {%- else -%}
-          {%- set ratio = [0.0, [1.0, (dawn_off + half) / trans] | min] | max -%}
-          {%- set smooth = ratio * ratio * (3.0 - 2.0 * ratio) -%}
-          {%- set ns.result = (night_k + (day_k - night_k) * smooth) | round | int -%}
-        {%- endif -%}
-      {%- elif is_night | bool -%}
-        {%- set ns.result = night_k -%}
-      {%- else -%}
-        {%- set ns.result = day_k -%}
-      {%- endif -%}
-      {{ ns.result }}
     {%- endif -%}
 
   # Antirimbalzo tra run (rilevante per accensioni)
