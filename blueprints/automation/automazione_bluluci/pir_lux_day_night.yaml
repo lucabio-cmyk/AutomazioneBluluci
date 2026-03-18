@@ -1349,7 +1349,9 @@ action:
           - choose:
               - conditions:
                   - condition: template
-                    value_template: "{{ any_mmwave_on | bool(false) }}"
+                    value_template: >-
+                      {{ (has_mmwave | bool(false) and is_state(mmwave_sensor, 'on')) or
+                         (has_mmwave_2 | bool(false) and is_state(mmwave_sensor_2, 'on')) }}
                 sequence:
                   - choose:
                       - conditions:
@@ -1400,7 +1402,9 @@ action:
           - choose:
               - conditions:
                   - condition: template
-                    value_template: "{{ any_mmwave_on | bool(false) }}"
+                    value_template: >-
+                      {{ (has_mmwave | bool(false) and is_state(mmwave_sensor, 'on')) or
+                         (has_mmwave_2 | bool(false) and is_state(mmwave_sensor_2, 'on')) }}
                 sequence:
                   - choose:
                       - conditions:
