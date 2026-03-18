@@ -1311,10 +1311,13 @@ action:
               {{ is_state(presence_sensor, 'off') and
                  (not (has_presence_sensor_2 | bool(false)) or is_state(presence_sensor_2, 'off')) }}
         sequence:
-          # Breve attesa di sicurezza prima di spegnere (max 60s o timeout attivo, il minore)
+          # Brevissima attesa di stabilizzazione (5s) prima di spegnere.
+          # NOTA: non usare delay lungo (es. 60s) perché con mode=restart un altro trigger lux
+          # durante l'attesa riavvia il caso 3 da capo, creando un loop infinito che impedisce
+          # lo spegnimento. Il debounce reale è già garantito da lux_trigger_stability_seconds
+          # a livello di trigger. Questi 5s sono solo per sicurezza sensore.
           - delay:
-              seconds: >-
-                {{ [active_timeout | int(60), 60] | min }}
+              seconds: 5
           # Ricontrolla assenza e override prima di spegnere (entrambi i sensori devono essere liberi)
           - condition: template
             value_template: >-
