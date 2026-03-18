@@ -717,12 +717,12 @@ trigger:
     for:
       seconds: !input motion_off_debounce_seconds
 
-  # Trigger calo lux: si attiva quando il lux scende sotto la soglia giorno
-  # per almeno lux_trigger_stability_seconds. Gestito nell'action con enable_lux_trigger.
-  # Nota: il trigger è sempre presente nel blueprint; la logica enable_lux_trigger
-  # controlla se effettuare azioni o solo il ripristino di sicurezza.
+  # Trigger calo lux: si attiva solo se enable_lux_trigger è abilitato.
+  # Se disabilitato, il lux è usato esclusivamente come controllo condizionale
+  # nell'accensione da movimento (caso 1), senza mai fare da trigger autonomo.
   - platform: numeric_state
     id: lux_below_threshold
+    enabled: !input enable_lux_trigger
     entity_id: !input lux_sensor
     below: !input day_lux_threshold
     for:
@@ -1296,10 +1296,9 @@ action:
                               {%- endif -%}
                             transition: "{{ (circadian_update_interval_minutes | int(5)) * 60 }}"
 
-      # 3) Trigger calo lux con ASSENZA rilevata -> ripristino sicuro del timer di spegnimento
-      # Con mode=restart, il trigger lux può interrompere un conto alla rovescia in corso.
-      # Questo handler garantisce che le luci vengano comunque spente se la stanza è vuota.
-      # Non esegue se il trigger lux è usato per accendere (caso 2) né se c'è presenza (PIR ON).
+      # 3) Trigger calo lux con ASSENZA rilevata -> spegnimento di sicurezza
+      # Si attiva solo se enable_lux_trigger=true (il trigger lux è abilitato).
+      # Gestisce il caso: lux scende con stanza vuota (nessun countdown motion_off in corso).
       # Open space: si attiva solo se ENTRAMBI i sensori sono liberi (nessuna presenza).
       - conditions:
           - condition: template
