@@ -8,6 +8,9 @@ blueprint:
     luminosità adattiva, temperatura colore circadiana, pre-spegnimento con dissolvenza e secondo
     sensore di movimento per open space (OR all'accensione, AND allo spegnimento).
   domain: automation
+  # Le sezioni di input (blueprint.input con gruppi collassabili) richiedono HA >= 2024.6.0.
+  homeassistant:
+    min_version: "2024.6.0"
   source_url: https://raw.githubusercontent.com/lucabio-cmyk/AutomazioneBluluci/main/blueprints/automation/automazione_bluluci/pir_lux_day_night.yaml
 
   input:
