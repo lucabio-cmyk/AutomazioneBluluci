@@ -1,105 +1,34 @@
 blueprint:
   name: "Auto Luci Movimento + mmWave + Lux (Giorno/Notte) - Robusto"
   description: >-
-    Blueprint professionale per accensione/spegnimento luci basato su sensori di movimento e luminosità,
-    con profili giorno/notte, override manuale, debounce, fallback sensori e supporto multi-luce.
-    Supporto opzionale fino a due sensori mmWave (radar) per mantenere la luce accesa quando viene rilevata
-    presenza stazionaria anche dopo che il sensore di movimento non rileva più attività.
-    Novità: rilevamento notte tramite sensore lux esterno (crepuscolare), trigger automatico al calo
-    di lux con presenza rilevata, dissolvenza pre-spegnimento e transizione morbida allo spegnimento.
-    Open space: supporto secondo sensore di movimento (es. sala + cucina) — logica OR all'accensione,
-    AND allo spegnimento (entrambi i sensori devono essere liberi prima di spegnere le luci).
+    Accensione/spegnimento luci basato su movimento e luminosità, con profili giorno/notte,
+    override manuale, debounce e supporto multi-luce.
+    Opzionali: fino a due sensori mmWave (radar) per tenere accesa la luce con presenza stazionaria,
+    rilevamento notte via sensore lux esterno (crepuscolare), accensione automatica al calo di lux,
+    luminosità adattiva, temperatura colore circadiana, pre-spegnimento con dissolvenza e secondo
+    sensore di movimento per open space (OR all'accensione, AND allo spegnimento).
   domain: automation
+  # Le sezioni di input (blueprint.input con gruppi collassabili) richiedono HA >= 2024.6.0.
+  homeassistant:
+    min_version: "2024.6.0"
   source_url: https://raw.githubusercontent.com/lucabio-cmyk/AutomazioneBluluci/main/blueprints/automation/automazione_bluluci/pir_lux_day_night.yaml
 
   input:
+    # ─────────────────────────────────────────────────────────────
+    # ESSENZIALI (sempre visibili)
+    # ─────────────────────────────────────────────────────────────
     presence_sensor:
-      name: Sensore di movimento 1
+      name: Sensore di movimento
       description: Binary sensor che indica movimento/presenza (on/off).
       selector:
         entity:
           domain: binary_sensor
 
-    presence_sensor_2:
-      name: Sensore di movimento 2 (opzionale, open space)
-      description: >-
-        Secondo sensore di movimento per ambienti open space (es. sala + cucina collegati).
-        Se configurato, la logica diventa OR all'accensione (basta uno dei due sensori per
-        accendere le luci) e AND allo spegnimento (entrambi devono essere liberi prima di
-        avviare il conto alla rovescia per lo spegnimento).
-        Usa sensori identici per risultati ottimali. Lascia vuoto per zona singola.
-      default: ""
-      selector:
-        entity:
-          domain: binary_sensor
-
-    mmwave_sensor:
-      name: Sensore mmWave / radar 1 (opzionale)
-      description: >-
-        Sensore radar mmWave (es. HLK-LD2410, LD2450, Tuya mmWave) per rilevamento
-        presenza stazionaria. Se configurato, impedisce lo spegnimento automatico
-        finché rileva presenza, anche quando il sensore di movimento non rileva più attività.
-        Lascia vuoto se non hai un sensore mmWave.
-      default: ""
-      selector:
-        entity:
-          domain: binary_sensor
-
-    mmwave_sensor_2:
-      name: Sensore mmWave / radar 2 (opzionale)
-      description: >-
-        Secondo sensore radar mmWave per ambienti open space o copertura estesa.
-        Se configurato, usa logica OR per mantenere le luci accese (basta uno dei due sensori
-        mmWave attivo per impedire lo spegnimento) e AND per consentire lo spegnimento
-        (entrambi devono essere liberi prima di procedere).
-        Lascia vuoto se hai un solo sensore mmWave.
-      default: ""
-      selector:
-        entity:
-          domain: binary_sensor
-
-    enable_mmwave_timeout:
-      name: Abilita timeout massimo mmWave (opzionale)
-      description: >-
-        Se attivo, applica un timeout massimo di sicurezza al mantenimento luce tramite mmWave.
-        Se disattivato, la luce resta accesa indefinitamente finché almeno un sensore mmWave rileva presenza.
-      default: true
-      selector:
-        boolean: {}
-
-    mmwave_keep_on_timeout_seconds:
-      name: Timeout massimo mantenimento luce mmWave (s)
-      description: >-
-        Tempo massimo aggiuntivo (dopo il timeout base assenza movimento) per cui la luce
-        resta accesa se uno o entrambi i sensori mmWave rilevano ancora presenza.
-        Allo scadere di questo timeout la luce si spegne comunque (sicurezza anti-blocco).
-        Ignorato se "Abilita timeout massimo mmWave" è disattivato.
-      default: 600
-      selector:
-        number:
-          min: 30
-          max: 3600
-          step: 30
-          mode: box
-          unit_of_measurement: s
-
     lux_sensor:
       name: Sensore luminosità (lux)
       description: >-
-        Sensore lux usato per il controllo accensione e, in modalità lux_based, per il
-        rilevamento notte. Ideale un sensore crepuscolare esterno (es. lux esterno).
-      selector:
-        entity:
-          domain: sensor
-
-    twilight_sensor:
-      name: Sensore crepuscolare esterno (opzionale, per rilevamento notte)
-      description: >-
-        Sensore lux dedicato al solo rilevamento notte in modalità lux_based.
-        Se valorizzato, il profilo notte viene deciso da questo sensore (consigliato se
-        vuoi separare il sensore usato per accensione da quello esterno crepuscolare).
-        Se lasciato vuoto, viene usato il sensore luminosità principale.
-      default: ""
+        Sensore lux per il controllo accensione e, in modalità lux_based, per il rilevamento notte.
+        Ideale un sensore crepuscolare esterno.
       selector:
         entity:
           domain: sensor
@@ -112,576 +41,641 @@ blueprint:
           entity:
             domain: light
 
-    automation_enabled:
-      name: Automazione abilitata
-      description: Disabilita rapidamente la logica senza rimuovere l'automazione.
-      default: true
-      selector:
-        boolean: {}
+    # ─────────────────────────────────────────────────────────────
+    # SENSORI AGGIUNTIVI (opzionali)
+    # ─────────────────────────────────────────────────────────────
+    advanced_sensors:
+      name: 🛰️ Sensori aggiuntivi (opzionali)
+      icon: mdi:radar
+      collapsed: true
+      input:
+        presence_sensor_2:
+          name: Sensore di movimento 2 (open space)
+          description: >-
+            Secondo sensore di movimento per open space (es. sala + cucina).
+            Logica OR all'accensione (basta uno dei due) e AND allo spegnimento
+            (entrambi liberi prima del countdown). Lascia vuoto per zona singola.
+          default: ""
+          selector:
+            entity:
+              domain: binary_sensor
 
-    manual_override_helper:
-      name: Helper override manuale (opzionale)
-      description: >-
-        Se selezionato e impostato su ON, sospende la logica automatica.
-        Utile per blocco temporaneo dopo comando manuale.
-      default: ""
-      selector:
-        entity:
-          domain: input_boolean
+        mmwave_sensor:
+          name: Sensore mmWave / radar 1
+          description: >-
+            Radar mmWave (es. LD2410/LD2450, Tuya) per presenza stazionaria.
+            Impedisce lo spegnimento finché rileva presenza, anche senza movimento PIR.
+            Lascia vuoto se non lo hai.
+          default: ""
+          selector:
+            entity:
+              domain: binary_sensor
 
-    keep_auto_off_during_override:
-      name: Mantieni spegnimento auto durante override
-      description: >-
-        Se attivo, durante override l'automazione NON accende ma può ancora spegnere
-        su assenza.
-      default: true
-      selector:
-        boolean: {}
+        mmwave_sensor_2:
+          name: Sensore mmWave / radar 2
+          description: >-
+            Secondo radar per open space o copertura estesa. OR per tenere accesa
+            (basta uno attivo), AND per consentire lo spegnimento (entrambi liberi).
+          default: ""
+          selector:
+            entity:
+              domain: binary_sensor
 
-    skip_if_light_already_on:
-      name: Salta accensione se luce già ON
-      description: Evita chiamate inutili quando almeno una luce target è già accesa.
-      default: true
-      selector:
-        boolean: {}
+        enable_mmwave_timeout:
+          name: Abilita timeout massimo mmWave
+          description: >-
+            Se attivo, applica un timeout massimo di sicurezza al mantenimento luce via mmWave.
+            Se disattivato, la luce resta accesa finché almeno un mmWave rileva presenza.
+          default: true
+          selector:
+            boolean: {}
 
-    enable_night_mode:
-      name: Abilita profilo notte
-      description: Se disattivato viene sempre usato il profilo giorno.
-      default: true
-      selector:
-        boolean: {}
+        mmwave_keep_on_timeout_seconds:
+          name: Timeout massimo mantenimento luce mmWave (s)
+          description: >-
+            Tempo massimo aggiuntivo (dopo il timeout base assenza movimento) per cui la luce
+            resta accesa se un mmWave rileva ancora presenza. Allo scadere si spegne comunque
+            (anti-blocco). Ignorato se il timeout mmWave è disattivato.
+          default: 600
+          selector:
+            number:
+              min: 30
+              max: 3600
+              step: 30
+              mode: box
+              unit_of_measurement: s
 
-    night_detection_mode:
-      name: Rilevamento notte
-      description: >-
-        Scegli come determinare se è notte:
-        - Orario: fascia oraria fissa (es. 22:30 – 06:30).
-        - Sole: tramonto/alba con offset opzionali.
-        - Lux esterno (crepuscolare): usa direttamente il valore del sensore lux.
-          Se selezionato, usa prima il "Sensore crepuscolare esterno" (se impostato),
-          altrimenti il sensore lux principale.
-          Se lux < soglia lux notte → profilo notte. Ideale con sensori crepuscolari esterni:
-          il sistema si adatta automaticamente a nuvole, stagioni e condizioni meteo reali.
-      default: time_based
-      selector:
-        select:
-          options:
-            - label: Basato su orario
-              value: time_based
-            - label: Basato su sole
-              value: sun_based
-            - label: Basato su lux esterno (crepuscolare)
-              value: lux_based
+        twilight_sensor:
+          name: Sensore crepuscolare esterno (per rilevamento notte)
+          description: >-
+            Sensore lux dedicato al solo rilevamento notte in modalità lux_based.
+            Se vuoto, viene usato il sensore luminosità principale.
+          default: ""
+          selector:
+            entity:
+              domain: sensor
 
-    night_start_time:
-      name: Inizio notte (modalità oraria)
-      description: Usato solo se night_detection_mode = time_based.
-      default: "22:30:00"
-      selector:
-        time: {}
+    # ─────────────────────────────────────────────────────────────
+    # COMPORTAMENTO GENERALE
+    # ─────────────────────────────────────────────────────────────
+    general:
+      name: ⚙️ Comportamento generale
+      icon: mdi:cog
+      collapsed: true
+      input:
+        automation_enabled:
+          name: Automazione abilitata
+          description: Disabilita rapidamente la logica senza rimuovere l'automazione.
+          default: true
+          selector:
+            boolean: {}
 
-    night_end_time:
-      name: Fine notte (modalità oraria)
-      description: Usato solo se night_detection_mode = time_based.
-      default: "06:30:00"
-      selector:
-        time: {}
+        manual_override_helper:
+          name: Helper override manuale (opzionale)
+          description: >-
+            input_boolean che, se ON, sospende la logica automatica.
+            Utile per blocco temporaneo dopo comando manuale.
+          default: ""
+          selector:
+            entity:
+              domain: input_boolean
 
-    sunset_offset_minutes:
-      name: Offset tramonto minuti (modalità sole)
-      description: Valori negativi anticipano la notte, positivi la ritardano.
-      default: 0
-      selector:
-        number:
-          min: -180
-          max: 180
-          step: 1
-          mode: box
-          unit_of_measurement: min
+        keep_auto_off_during_override:
+          name: Mantieni spegnimento auto durante override
+          description: Se attivo, durante override l'automazione NON accende ma può ancora spegnere su assenza.
+          default: true
+          selector:
+            boolean: {}
 
-    sunrise_offset_minutes:
-      name: Offset alba minuti (modalità sole)
-      description: Valori negativi anticipano fine notte, positivi la estendono.
-      default: 0
-      selector:
-        number:
-          min: -180
-          max: 180
-          step: 1
-          mode: box
-          unit_of_measurement: min
+        skip_if_light_already_on:
+          name: Salta accensione se luce già ON
+          description: Evita chiamate inutili quando almeno una luce target è già accesa.
+          default: true
+          selector:
+            boolean: {}
 
-    lux_night_detection_threshold:
-      name: Soglia lux per profilo notte (modalità lux esterno)
-      description: >-
-        Usato solo se night_detection_mode = lux_based.
-        Se il sensore lux esterno legge SOTTO questa soglia → profilo notte attivo
-        (luminosità ridotta, temperatura colore calda, timeout più breve).
-        Impostare in base al sensore: es. 30-80 lx per crepuscolo/imbrunire.
-        NOTA: questa soglia è indipendente da "Soglia lux giorno/notte" che controlla
-        SE le luci si accendono; questa controlla QUALE profilo viene usato.
-      default: 50
-      selector:
-        number:
-          min: 0
-          max: 1000
-          step: 1
-          mode: slider
-          unit_of_measurement: lx
+        min_time_between_runs_seconds:
+          name: Tempo minimo tra nuove accensioni (s)
+          description: Antirimbalzo logico per evitare comandi ON troppo ravvicinati.
+          default: 2
+          selector:
+            number:
+              min: 0
+              max: 300
+              step: 1
+              mode: box
+              unit_of_measurement: s
 
-    enable_lux_check:
-      name: Abilita controllo lux in accensione
-      default: true
-      selector:
-        boolean: {}
+        motion_on_debounce_seconds:
+          name: Debounce movimento ON (s)
+          description: Il movimento deve restare ON per questo tempo prima del trigger.
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 30
+              step: 1
+              mode: slider
+              unit_of_measurement: s
 
-    lux_fallback_value:
-      name: Lux fallback (sensore unknown/unavailable)
-      description: Valore usato quando il sensore lux non è valido.
-      default: 999
-      selector:
-        number:
-          min: 0
-          max: 5000
-          step: 1
-          mode: box
-          unit_of_measurement: lx
+        motion_off_debounce_seconds:
+          name: Debounce assenza OFF (s)
+          description: L'assenza deve restare OFF per questo tempo prima del trigger.
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 30
+              step: 1
+              mode: slider
+              unit_of_measurement: s
 
-    day_lux_threshold:
-      name: Soglia lux giorno
-      description: >-
-        Soglia massima di lux per accendere le luci in profilo giorno.
-        Se lux esterno > questa soglia, la luce NON viene accesa (già abbastanza chiaro).
-        Usato anche come soglia di trigger per il calo di lux (vedere "Abilita trigger calo lux").
-      default: 120
-      selector:
-        number:
-          min: 0
-          max: 5000
-          step: 1
-          mode: slider
-          unit_of_measurement: lx
+    # ─────────────────────────────────────────────────────────────
+    # GIORNO / NOTTE
+    # ─────────────────────────────────────────────────────────────
+    day_night:
+      name: 🌗 Giorno / Notte
+      icon: mdi:theme-light-dark
+      collapsed: true
+      input:
+        enable_night_mode:
+          name: Abilita profilo notte
+          description: Se disattivato viene sempre usato il profilo giorno.
+          default: true
+          selector:
+            boolean: {}
 
-    enable_lux_trigger:
-      name: Abilita accensione automatica al calo di lux (crepuscolo)
-      description: >-
-        Se attivo, quando il sensore lux scende sotto la soglia del profilo attivo E
-        la presenza è già rilevata, le luci si accendono automaticamente senza attendere
-        un nuovo movimento del PIR. Ideale con sensore crepuscolare esterno: le luci
-        si accendono da sole al tramonto o quando arrivano le nuvole, se sei in stanza.
-        NOTA: il trigger usa come soglia il valore di "Soglia lux giorno" (deve restare
-        stabile per il tempo configurato in "Stabilità lux" per evitare falsi positivi).
-        Con mode=restart, un trigger lux che si attiva con assenza rilevata interrompe
-        il conto alla rovescia: la logica include un ripristino automatico di sicurezza.
-      default: false
-      selector:
-        boolean: {}
+        night_detection_mode:
+          name: Rilevamento notte
+          description: >-
+            Come determinare se è notte:
+            - Orario: fascia oraria fissa (es. 22:30 – 06:30).
+            - Sole: tramonto/alba con offset opzionali.
+            - Lux esterno: usa il sensore crepuscolare (o il lux principale se non impostato).
+              Se lux < soglia notte → profilo notte. Ideale con sensori crepuscolari esterni.
+          default: time_based
+          selector:
+            select:
+              options:
+                - label: Basato su orario
+                  value: time_based
+                - label: Basato su sole
+                  value: sun_based
+                - label: Basato su lux esterno (crepuscolare)
+                  value: lux_based
 
-    lux_trigger_stability_seconds:
-      name: Stabilità lux prima del trigger (s)
-      description: >-
-        Il sensore lux deve restare sotto la soglia giorno per almeno questo tempo
-        prima che venga attivata l'accensione automatica.
-        Evita accensioni spurie per brevi variazioni (nuvole passeggere, ombre momentanee).
-        Consigliato: 30-120 s. Con valori bassi il sistema è più reattivo ma più sensibile
-        alle fluttuazioni del sensore.
-      default: 60
-      selector:
-        number:
-          min: 5
-          max: 600
-          step: 5
-          mode: slider
-          unit_of_measurement: s
+        night_start_time:
+          name: Inizio notte (modalità oraria)
+          description: Usato solo se rilevamento notte = orario.
+          default: "22:30:00"
+          selector:
+            time: {}
 
-    day_brightness_pct:
-      name: Luminosità giorno (%)
-      default: 85
-      selector:
-        number:
-          min: 1
-          max: 100
-          step: 1
-          mode: slider
-          unit_of_measurement: "%"
+        night_end_time:
+          name: Fine notte (modalità oraria)
+          description: Usato solo se rilevamento notte = orario.
+          default: "06:30:00"
+          selector:
+            time: {}
 
-    day_transition_seconds:
-      name: Transizione accensione giorno (s)
-      default: 1
-      selector:
-        number:
-          min: 0
-          max: 30
-          step: 1
-          mode: slider
-          unit_of_measurement: s
+        sunset_offset_minutes:
+          name: Offset tramonto (min, modalità sole)
+          description: Negativi anticipano la notte, positivi la ritardano.
+          default: 0
+          selector:
+            number:
+              min: -180
+              max: 180
+              step: 1
+              mode: box
+              unit_of_measurement: min
 
-    day_no_motion_timeout_seconds:
-      name: Timeout assenza giorno (s)
-      default: 180
-      selector:
-        number:
-          min: 5
-          max: 7200
-          step: 1
-          mode: box
-          unit_of_measurement: s
+        sunrise_offset_minutes:
+          name: Offset alba (min, modalità sole)
+          description: Negativi anticipano la fine notte, positivi la estendono.
+          default: 0
+          selector:
+            number:
+              min: -180
+              max: 180
+              step: 1
+              mode: box
+              unit_of_measurement: min
 
-    night_lux_threshold:
-      name: Soglia lux notte
-      description: >-
-        Soglia massima di lux per accendere le luci in profilo notte.
-        Solitamente più bassa della soglia giorno perché di notte anche poca luce
-        ambientale può essere sufficiente.
-      default: 20
-      selector:
-        number:
-          min: 0
-          max: 5000
-          step: 1
-          mode: slider
-          unit_of_measurement: lx
+        lux_night_detection_threshold:
+          name: Soglia lux per profilo notte (modalità lux esterno)
+          description: >-
+            Usato solo in modalità lux esterno. Se il lux esterno legge SOTTO questa soglia
+            → profilo notte (luminosità ridotta, colore caldo, timeout più breve).
+            Es. 30-80 lx per crepuscolo. Indipendente da "Soglia lux giorno" (quella decide
+            SE le luci si accendono; questa decide QUALE profilo usare).
+          default: 50
+          selector:
+            number:
+              min: 0
+              max: 1000
+              step: 1
+              mode: slider
+              unit_of_measurement: lx
 
-    night_brightness_pct:
-      name: Luminosità notte (%)
-      default: 25
-      selector:
-        number:
-          min: 1
-          max: 100
-          step: 1
-          mode: slider
-          unit_of_measurement: "%"
+    # ─────────────────────────────────────────────────────────────
+    # ACCENSIONE & LUMINOSITÀ
+    # ─────────────────────────────────────────────────────────────
+    turn_on:
+      name: 💡 Accensione & Luminosità
+      icon: mdi:lightbulb-on
+      collapsed: true
+      input:
+        enable_lux_check:
+          name: Abilita controllo lux in accensione
+          default: true
+          selector:
+            boolean: {}
 
-    night_transition_seconds:
-      name: Transizione accensione notte (s)
-      default: 1
-      selector:
-        number:
-          min: 0
-          max: 30
-          step: 1
-          mode: slider
-          unit_of_measurement: s
+        lux_fallback_value:
+          name: Lux fallback (sensore unknown/unavailable)
+          description: >-
+            Valore usato quando il sensore lux non è valido. Il default alto (999) evita
+            accensioni indesiderate, ma se il tuo sensore va spesso "unavailable" può impedire
+            l'accensione: in quel caso abbassalo sotto la soglia giorno.
+          default: 999
+          selector:
+            number:
+              min: 0
+              max: 5000
+              step: 1
+              mode: box
+              unit_of_measurement: lx
 
-    night_no_motion_timeout_seconds:
-      name: Timeout assenza notte (s)
-      default: 90
-      selector:
-        number:
-          min: 5
-          max: 7200
-          step: 1
-          mode: box
-          unit_of_measurement: s
+        day_lux_threshold:
+          name: Soglia lux giorno
+          description: >-
+            Sopra questa soglia le luci NON si accendono in profilo giorno (già abbastanza chiaro).
+            Usata anche come soglia per il trigger di calo lux.
+          default: 120
+          selector:
+            number:
+              min: 0
+              max: 5000
+              step: 1
+              mode: slider
+              unit_of_measurement: lx
 
-    enable_color_temp:
-      name: Abilita controllo temperatura colore (bianco)
-      description: >-
-        Se attivo, imposta la temperatura colore (bianco caldo/freddo) all'accensione,
-        differenziata tra profilo giorno e notte.
-        Funziona solo con luci che supportano la temperatura colore (es. lampadine LED RGBW o CCT).
-      default: false
-      selector:
-        boolean: {}
+        night_lux_threshold:
+          name: Soglia lux notte
+          description: >-
+            Sopra questa soglia le luci NON si accendono in profilo notte.
+            Di solito più bassa della soglia giorno.
+          default: 20
+          selector:
+            number:
+              min: 0
+              max: 5000
+              step: 1
+              mode: slider
+              unit_of_measurement: lx
 
-    day_color_temp_kelvin:
-      name: Temperatura colore giorno (K)
-      description: >-
-        Temperatura del bianco di giorno. Valori più alti = bianco più freddo/neutro
-        (es. 4000K = bianco neutro, 6500K = bianco freddo luce del giorno).
-      default: 4000
-      selector:
-        number:
-          min: 2000
-          max: 6500
-          step: 100
-          mode: slider
-          unit_of_measurement: K
+        enable_lux_trigger:
+          name: Accensione automatica al calo di lux (crepuscolo)
+          description: >-
+            Se attivo, quando il lux scende sotto la soglia del profilo attivo E c'è già presenza,
+            le luci si accendono senza attendere un nuovo movimento PIR. Ideale con sensore
+            crepuscolare esterno. Soglia = "Soglia lux giorno", stabile per il tempo configurato.
+          default: false
+          selector:
+            boolean: {}
 
-    night_color_temp_kelvin:
-      name: Temperatura colore notte (K)
-      description: >-
-        Temperatura del bianco di notte. Valori più bassi = bianco più caldo/ambra
-        (es. 2700K = bianco caldo, ideale per rilassarsi e non disturbare il sonno).
-      default: 2700
-      selector:
-        number:
-          min: 2000
-          max: 6500
-          step: 100
-          mode: slider
-          unit_of_measurement: K
+        lux_trigger_stability_seconds:
+          name: Stabilità lux prima del trigger (s)
+          description: >-
+            Il lux deve restare sotto soglia per almeno questo tempo prima dell'accensione automatica.
+            Evita accensioni spurie per nuvole passeggere. Consigliato 30-120 s.
+          default: 60
+          selector:
+            number:
+              min: 5
+              max: 600
+              step: 5
+              mode: slider
+              unit_of_measurement: s
 
-    enable_circadian_color_temp:
-      name: Abilita temperatura colore circadiana (transizione continua)
-      description: >-
-        Se attivo, la temperatura colore varia in modo continuo seguendo l'elevazione solare
-        letta dall'entità configurata, usando una curva multi-fase con smoothstep cubico:
-        notte stabile a night_k, alba/tramonto graduali con effetto ora d'oro,
-        pieno giorno a day_k, picco mezzogiorno opzionale a noon_k.
-        Richiede "Abilita controllo temperatura colore" attivo e l'entità elevazione solare configurata.
-      default: false
-      selector:
-        boolean: {}
+        day_brightness_pct:
+          name: Luminosità giorno (%)
+          default: 85
+          selector:
+            number:
+              min: 1
+              max: 100
+              step: 1
+              mode: slider
+              unit_of_measurement: "%"
 
-    noon_color_temp_kelvin:
-      name: Temperatura colore picco mezzogiorno (K)
-      description: >-
-        Temperatura del bianco al picco di elevazione solare (mezzogiorno).
-        Se impostata sopra la temperatura giorno, la luce diventa progressivamente
-        più fredda man mano che il sole sale, raggiungendo il picco intorno a 55°
-        di elevazione e tornando a scaldarsi nel pomeriggio.
-        Esempio: day_k=4000K, noon_k=5500K → al massimo del sole si hanno 5500K
-        (bianco freddo/luce del giorno), mentre di mattina/sera ~4000K.
-        0 = disabilita il picco (la temperatura rimane a day_k durante tutto il giorno).
-      default: 0
-      selector:
-        number:
-          min: 0
-          max: 6500
-          step: 100
-          mode: slider
-          unit_of_measurement: K
+        night_brightness_pct:
+          name: Luminosità notte (%)
+          default: 25
+          selector:
+            number:
+              min: 1
+              max: 100
+              step: 1
+              mode: slider
+              unit_of_measurement: "%"
 
-    morning_color_temp_kelvin:
-      name: Temperatura colore mattina (K)
-      description: >-
-        Temperatura del bianco nella fase mattutina, quando il sole è in salita
-        (da ~6° a ~25° di elevazione). Valori tipici: 3000–3800K (bianco leggermente caldo).
-        Se impostato a 0, usa la temperatura giorno anche di mattina.
-        Richiede "Abilita temperatura colore circadiana" attivo.
-      default: 3500
-      selector:
-        number:
-          min: 0
-          max: 6500
-          step: 100
-          mode: slider
-          unit_of_measurement: K
+        day_transition_seconds:
+          name: Transizione accensione giorno (s)
+          default: 1
+          selector:
+            number:
+              min: 0
+              max: 30
+              step: 1
+              mode: slider
+              unit_of_measurement: s
 
-    evening_color_temp_kelvin:
-      name: Temperatura colore sera (K)
-      description: >-
-        Temperatura del bianco nella fase serale, quando il sole è in discesa
-        (da ~25° a ~6° di elevazione). Valori tipici: 2800–3500K (bianco caldo/ambra).
-        Se impostato a 0, usa la temperatura giorno anche di sera.
-        Richiede "Abilita temperatura colore circadiana" attivo.
-      default: 3000
-      selector:
-        number:
-          min: 0
-          max: 6500
-          step: 100
-          mode: slider
-          unit_of_measurement: K
+        night_transition_seconds:
+          name: Transizione accensione notte (s)
+          default: 1
+          selector:
+            number:
+              min: 0
+              max: 30
+              step: 1
+              mode: slider
+              unit_of_measurement: s
 
-    circadian_transition_minutes:
-      name: Durata transizione colore circadiana (min)
-      description: >-
-        Durata in minuti della transizione morbida al momento dell'accensione,
-        quando la modalità circadiana è attiva. Permette alla luce di raggiungere
-        gradualmente la temperatura colore target mattina/sera anziché cambiare
-        istantaneamente. Con 0, usa la transizione di accensione normale (giorno/notte).
-        Esempio: 5 min = la luce impiega 5 minuti a raggiungere il bianco circadiano.
-      default: 5
-      selector:
-        number:
-          min: 0
-          max: 60
-          step: 1
-          mode: slider
-          unit_of_measurement: min
+        enable_adaptive_brightness:
+          name: Abilita luminosità adattiva al lux
+          description: >-
+            Se attivo, la luminosità si adatta al lux ambiente: più buio → più luce,
+            lux vicino alla soglia → luce al minimo configurato. Interpolazione lineare.
+            Solo in modalità "Controllo luminosità" e con controllo lux abilitato.
+          default: false
+          selector:
+            boolean: {}
 
-    enable_circadian_periodic_update:
-      name: Abilita aggiornamento circadiano periodico (transizione continua)
-      description: >-
-        Se attivo, mentre la luce è accesa invia un aggiornamento circadiano ogni
-        N minuti, ricalcolando la temperatura colore in base all'elevazione solare
-        corrente. La transizione HA ha la stessa durata dell'intervallo: la luce
-        segue il sole in modo continuo e senza salti visibili.
-        Con mode=restart, il loop si interrompe automaticamente al trigger di assenza
-        (motion_off), che gestisce lo spegnimento senza interferenze.
-        Richiede "Abilita temperatura colore circadiana" attivo.
-      default: false
-      selector:
-        boolean: {}
+        adaptive_brightness_min_pct:
+          name: Luminosità adattiva minima (%)
+          description: Luminosità minima quando il lux è vicino alla soglia. La luce non scende sotto questo valore.
+          default: 20
+          selector:
+            number:
+              min: 1
+              max: 100
+              step: 1
+              mode: slider
+              unit_of_measurement: "%"
 
-    circadian_update_interval_minutes:
-      name: Intervallo aggiornamento circadiano (min)
-      description: >-
-        Ogni quanti minuti viene aggiornata la temperatura colore mentre la luce
-        è accesa. La transizione HA ha la stessa durata dell'intervallo: con 5 min
-        la luce varia in modo continuo senza salti. Valori bassi = più fluido ma
-        più comandi inviati alla luce. Consigliato: 5 min.
-      default: 5
-      selector:
-        number:
-          min: 1
-          max: 30
-          step: 1
-          mode: slider
-          unit_of_measurement: min
+    # ─────────────────────────────────────────────────────────────
+    # SPEGNIMENTO
+    # ─────────────────────────────────────────────────────────────
+    turn_off:
+      name: 🌙 Spegnimento
+      icon: mdi:lightbulb-off
+      collapsed: true
+      input:
+        day_no_motion_timeout_seconds:
+          name: Timeout assenza giorno (s)
+          default: 180
+          selector:
+            number:
+              min: 5
+              max: 7200
+              step: 1
+              mode: box
+              unit_of_measurement: s
 
-    solar_elevation_entity:
-      name: Entità elevazione solare
-      description: >-
-        Entità sensore che fornisce il valore dell'elevazione solare in gradi (es. sensor.sun_solar_elevation,
-        oppure l'attributo elevazione di sun.sun tramite un template sensor).
-        Usata per calcolare la temperatura colore circadiana: la curva segue l'elevazione
-        del sole dal valore minimo notturno (night_k) fino al picco di mezzogiorno (noon_k).
-        Richiesto quando "Abilita temperatura colore circadiana" è attivo.
-      selector:
-        entity:
-          domain: sensor
+        night_no_motion_timeout_seconds:
+          name: Timeout assenza notte (s)
+          default: 90
+          selector:
+            number:
+              min: 5
+              max: 7200
+              step: 1
+              mode: box
+              unit_of_measurement: s
 
-    enable_adaptive_brightness:
-      name: Abilita luminosità adattiva al lux
-      description: >-
-        Se attivo, la luminosità si adatta automaticamente al livello di lux ambiente:
-        più è buio (lux basso rispetto alla soglia) → luce più intensa;
-        più è luminoso (lux vicino alla soglia) → luce al minimo configurato.
-        Interpolazione lineare tra la luminosità massima del profilo e il minimo impostato.
-        Funziona solo in modalità "Controllo luminosità" (non con le scene).
-        Richiede che il controllo lux sia abilitato e il sensore lux valido.
-      default: false
-      selector:
-        boolean: {}
+        enable_pre_off_dim:
+          name: Pre-spegnimento con dissolvenza (avviso visivo)
+          description: >-
+            Prima di spegnere, porta le luci a bassa intensità per qualche secondo come avviso.
+            Se torna il movimento durante l'avviso, le luci tornano piene e il timer riparte.
+          default: false
+          selector:
+            boolean: {}
 
-    adaptive_brightness_min_pct:
-      name: Luminosità adattiva minima (%)
-      description: >-
-        Luminosità minima raggiunta quando il lux è vicino alla soglia di accensione.
-        La luce non scenderà mai sotto questo valore.
-        Ignorato se "Abilita luminosità adattiva" è disattivato.
-      default: 20
-      selector:
-        number:
-          min: 1
-          max: 100
-          step: 1
-          mode: slider
-          unit_of_measurement: "%"
+        pre_off_dim_brightness_pct:
+          name: Luminosità pre-spegnimento (%)
+          description: Intensità ridotta durante la fase di avviso.
+          default: 10
+          selector:
+            number:
+              min: 1
+              max: 50
+              step: 1
+              mode: slider
+              unit_of_measurement: "%"
 
-    enable_pre_off_dim:
-      name: Abilita pre-spegnimento con dissolvenza (avviso visivo)
-      description: >-
-        Prima di spegnere le luci, le porta a bassa intensità per qualche secondo
-        come segnale visivo di imminente spegnimento.
-        Utile in bagno, studio o situazioni in cui uno spegnimento improvviso sarebbe
-        scomodo: l'utente vede la luce abbassarsi e sa che sta per spegnersi.
-        La fase di dimming usa la transizione configurata in "Transizione spegnimento".
-      default: false
-      selector:
-        boolean: {}
+        pre_off_dim_duration_seconds:
+          name: Durata avviso pre-spegnimento (s)
+          description: Tempo a bassa intensità prima dello spegnimento definitivo.
+          default: 15
+          selector:
+            number:
+              min: 3
+              max: 120
+              step: 1
+              mode: slider
+              unit_of_measurement: s
 
-    pre_off_dim_brightness_pct:
-      name: Luminosità pre-spegnimento (%)
-      description: Intensità ridotta durante la fase di avviso prima dello spegnimento.
-      default: 10
-      selector:
-        number:
-          min: 1
-          max: 50
-          step: 1
-          mode: slider
-          unit_of_measurement: "%"
+        off_transition_seconds:
+          name: Transizione allo spegnimento (s)
+          description: Dissolvenza morbida allo spegnimento (e nel pre-spegnimento). 0 = immediato.
+          default: 2
+          selector:
+            number:
+              min: 0
+              max: 30
+              step: 1
+              mode: slider
+              unit_of_measurement: s
 
-    pre_off_dim_duration_seconds:
-      name: Durata avviso pre-spegnimento (s)
-      description: >-
-        Tempo in cui le luci restano a bassa intensità prima dello spegnimento definitivo.
-        Durante questo periodo, se viene rilevato movimento, le luci tornano alla piena
-        intensità e il conto alla rovescia riparte normalmente.
-      default: 15
-      selector:
-        number:
-          min: 3
-          max: 120
-          step: 1
-          mode: slider
-          unit_of_measurement: s
+    # ─────────────────────────────────────────────────────────────
+    # TEMPERATURA COLORE (bianco)
+    # ─────────────────────────────────────────────────────────────
+    color_temp:
+      name: 🎨 Temperatura colore (bianco)
+      icon: mdi:thermometer
+      collapsed: true
+      input:
+        enable_color_temp:
+          name: Abilita controllo temperatura colore
+          description: >-
+            Imposta la temperatura colore (bianco caldo/freddo) all'accensione, differenziata
+            giorno/notte. Solo con luci CCT/RGBW.
+          default: false
+          selector:
+            boolean: {}
 
-    off_transition_seconds:
-      name: Transizione allo spegnimento (s)
-      description: >-
-        Dissolvenza morbida quando le luci si spengono (e nella fase pre-spegnimento).
-        0 = spegnimento immediato senza dissolvenza.
-      default: 2
-      selector:
-        number:
-          min: 0
-          max: 30
-          step: 1
-          mode: slider
-          unit_of_measurement: s
+        day_color_temp_kelvin:
+          name: Temperatura colore giorno (K)
+          description: Valori alti = bianco più freddo (4000K neutro, 6500K luce del giorno).
+          default: 4000
+          selector:
+            number:
+              min: 2000
+              max: 6500
+              step: 100
+              mode: slider
+              unit_of_measurement: K
 
-    motion_on_debounce_seconds:
-      name: Debounce movimento ON (s)
-      description: Il movimento deve restare ON per questo tempo prima del trigger.
-      default: 0
-      selector:
-        number:
-          min: 0
-          max: 30
-          step: 1
-          mode: slider
-          unit_of_measurement: s
+        night_color_temp_kelvin:
+          name: Temperatura colore notte (K)
+          description: Valori bassi = bianco più caldo (2700K caldo, ideale per la sera).
+          default: 2700
+          selector:
+            number:
+              min: 2000
+              max: 6500
+              step: 100
+              mode: slider
+              unit_of_measurement: K
 
-    motion_off_debounce_seconds:
-      name: Debounce assenza OFF (s)
-      description: L'assenza deve restare OFF per questo tempo prima del trigger.
-      default: 0
-      selector:
-        number:
-          min: 0
-          max: 30
-          step: 1
-          mode: slider
-          unit_of_measurement: s
+        enable_circadian_color_temp:
+          name: Temperatura colore circadiana (transizione continua)
+          description: >-
+            La temperatura colore varia con continuità seguendo l'elevazione solare (curva
+            multi-fase con smoothstep): notte a night_k, alba/tramonto graduali, giorno a day_k,
+            picco mezzogiorno opzionale a noon_k. Richiede il controllo temperatura colore
+            attivo e l'entità elevazione solare.
+          default: false
+          selector:
+            boolean: {}
 
-    min_time_between_runs_seconds:
-      name: Tempo minimo tra nuove accensioni (s)
-      description: Antirimbalzo logico per evitare comandi ON troppo ravvicinati.
-      default: 2
-      selector:
-        number:
-          min: 0
-          max: 300
-          step: 1
-          mode: box
-          unit_of_measurement: s
+        solar_elevation_entity:
+          name: Entità elevazione solare
+          description: >-
+            Sensore con l'elevazione solare in gradi (es. un template sensor sull'attributo
+            elevation di sun.sun). Richiesto solo con temperatura colore circadiana attiva.
+          default: ""
+          selector:
+            entity:
+              domain: sensor
 
-    brightness_mode:
-      name: Modalità controllo luci
-      description: >-
-        brightness_control: usa brightness + transition.
-        scene_control: attiva scene giorno/notte (se configurate).
-      default: brightness_control
-      selector:
-        select:
-          options:
-            - label: Controllo luminosità
-              value: brightness_control
-            - label: Controllo scene
-              value: scene_control
+        morning_color_temp_kelvin:
+          name: Temperatura colore mattina (K)
+          description: >-
+            Fase mattutina, sole in salita (~6°→25°). Tipici 3000-3800K. 0 = usa la temperatura giorno.
+          default: 3500
+          selector:
+            number:
+              min: 0
+              max: 6500
+              step: 100
+              mode: slider
+              unit_of_measurement: K
 
-    day_scene:
-      name: Scena giorno (opzionale)
-      description: Usata solo con brightness_mode = scene_control.
-      default: ""
-      selector:
-        entity:
-          domain: scene
+        evening_color_temp_kelvin:
+          name: Temperatura colore sera (K)
+          description: >-
+            Fase serale, sole in discesa (~25°→6°). Tipici 2800-3500K. 0 = usa la temperatura giorno.
+          default: 3000
+          selector:
+            number:
+              min: 0
+              max: 6500
+              step: 100
+              mode: slider
+              unit_of_measurement: K
 
-    night_scene:
-      name: Scena notte (opzionale)
-      description: Usata solo con brightness_mode = scene_control.
-      default: ""
-      selector:
-        entity:
-          domain: scene
+        noon_color_temp_kelvin:
+          name: Temperatura colore picco mezzogiorno (K)
+          description: >-
+            Bianco al picco di elevazione. Se > temperatura giorno, la luce si raffredda
+            verso mezzogiorno (picco ~55°). 0 = disabilita il picco (resta a day_k).
+          default: 0
+          selector:
+            number:
+              min: 0
+              max: 6500
+              step: 100
+              mode: slider
+              unit_of_measurement: K
+
+        circadian_transition_minutes:
+          name: Durata transizione colore circadiana (min)
+          description: >-
+            Durata della transizione morbida all'accensione in modalità circadiana.
+            0 = usa la transizione di accensione normale.
+          default: 5
+          selector:
+            number:
+              min: 0
+              max: 60
+              step: 1
+              mode: slider
+              unit_of_measurement: min
+
+        enable_circadian_periodic_update:
+          name: Aggiornamento circadiano periodico (transizione continua)
+          description: >-
+            Mentre la luce è accesa, aggiorna la temperatura colore ogni N minuti in base
+            all'elevazione solare corrente (transizione = intervallo, nessun salto).
+            Con mode=restart il loop si interrompe al trigger di assenza.
+            Richiede temperatura colore circadiana attiva.
+          default: false
+          selector:
+            boolean: {}
+
+        circadian_update_interval_minutes:
+          name: Intervallo aggiornamento circadiano (min)
+          description: Ogni quanti minuti aggiornare la temperatura colore. Consigliato 5 min.
+          default: 5
+          selector:
+            number:
+              min: 1
+              max: 30
+              step: 1
+              mode: slider
+              unit_of_measurement: min
+
+    # ─────────────────────────────────────────────────────────────
+    # MODALITÀ SCENE (avanzato)
+    # ─────────────────────────────────────────────────────────────
+    scenes:
+      name: 🎬 Modalità scene (avanzato)
+      icon: mdi:palette
+      collapsed: true
+      input:
+        brightness_mode:
+          name: Modalità controllo luci
+          description: >-
+            brightness_control: usa brightness + transition.
+            scene_control: attiva scene giorno/notte (se configurate).
+          default: brightness_control
+          selector:
+            select:
+              options:
+                - label: Controllo luminosità
+                  value: brightness_control
+                - label: Controllo scene
+                  value: scene_control
+
+        day_scene:
+          name: Scena giorno (opzionale)
+          description: Usata solo con modalità scene.
+          default: ""
+          selector:
+            entity:
+              domain: scene
+
+        night_scene:
+          name: Scena notte (opzionale)
+          description: Usata solo con modalità scene.
+          default: ""
+          selector:
+            entity:
+              domain: scene
 
 mode: restart
 max_exceeded: silent
@@ -718,8 +712,6 @@ trigger:
       seconds: !input motion_off_debounce_seconds
 
   # Trigger calo lux: si attiva solo se enable_lux_trigger è abilitato.
-  # Se disabilitato, il lux è usato esclusivamente come controllo condizionale
-  # nell'accensione da movimento (caso 1), senza mai fare da trigger autonomo.
   - platform: numeric_state
     id: lux_below_threshold
     enabled: !input enable_lux_trigger
@@ -818,9 +810,6 @@ variables:
     {% endif %}
 
   # Rilevamento notte: time_based, sun_based, o lux_based (sensore crepuscolare esterno).
-  # Modalità lux_based: ideale con sensore crepuscolare esterno. Il profilo notte si attiva
-  # automaticamente quando il lux esterno scende sotto lux_night_detection_threshold,
-  # adattandosi a stagioni, meteo e condizioni reali senza bisogno di orari fissi.
   # Usa namespace + {%- -%} per produrre esattamente "True"/"False" senza spazi.
   is_night: >-
     {%- set ns = namespace(v=false) -%}
@@ -863,7 +852,6 @@ variables:
   adaptive_brightness_min_pct: !input adaptive_brightness_min_pct
 
   # Luminosità adattiva: se abilitata, scala linearmente tra base (buio totale) e minimo (lux vicino a soglia).
-  # Formula: brightness = min_b + (base - min_b) * (1 - lux / soglia), con ratio clampato a [0, 1].
   active_brightness: >-
     {%- set base = (night_brightness_pct if is_night | bool else day_brightness_pct) | int(100) -%}
     {%- if enable_adaptive_brightness | bool(false) and enable_lux_check | bool(true)
@@ -877,9 +865,7 @@ variables:
     {%- endif -%}
   active_transition: "{{ night_transition_seconds if is_night | bool else day_transition_seconds }}"
   active_timeout: "{{ night_no_motion_timeout_seconds if is_night | bool else day_no_motion_timeout_seconds }}"
-  # Transizione colore circadiana: se la modalità circadiana è attiva e circadian_transition_minutes > 0,
-  # usa una transizione più lunga per far raggiungere gradualmente alla luce la temperatura target.
-  # Altrimenti usa la transizione di accensione normale (active_transition).
+  # Transizione colore circadiana: se attiva e circadian_transition_minutes > 0, usa una transizione più lunga.
   active_color_transition: >-
     {%- if enable_color_temp | bool(false) and enable_circadian_color_temp | bool(false)
            and (circadian_transition_minutes | int(0)) > 0 -%}
@@ -901,41 +887,15 @@ variables:
   solar_elevation_entity: !input solar_elevation_entity
 
   # Temperatura colore attiva: se circadiana abilitata, segue una curva continua multi-fase
-  # basata sull'elevazione solare letta dall'entità solar_elevation_entity.
-  # Smoothstep cubico s(t)=t²·(3−2t) per transizioni naturali senza salti di derivata.
-  #
-  # La curva distingue la fase MATTUTINA (sole in salita) da quella SERALE (sole in discesa)
-  # tramite state_attr('sun.sun','rising'), consentendo temperature diverse nei due momenti.
-  #
-  # Fase MATTUTINA (sun.rising = true):
-  #   ≤ −6°          notte costante (night_k)
-  #   −6° →  6°      alba:       night_k   → morning_k   [ora d'oro]
-  #    6° → 25°      mattina:    morning_k → day_k
-  #   25° → 55°      picco:      day_k     → noon_k       [opzionale, se noon_k > day_k]
-  #   > 55°          mezzogiorno costante (noon_k o day_k)
-  #
-  # Fase SERALE (sun.rising = false):
-  #   > 55°          picco costante (noon_k o day_k)
-  #   55° → 25°      pomeriggio: noon_k    → day_k        [opzionale]
-  #   25° →  6°      sera:       day_k     → evening_k
-  #    6° → −6°      tramonto:   evening_k → night_k      [ora d'oro serale]
-  #   ≤ −6°          notte costante (night_k)
+  # basata sull'elevazione solare (smoothstep cubico s(t)=t²·(3−2t)).
+  # Fase MATTUTINA (sun.rising=true): ≤−6° night_k · −6°→6° alba→morning_k · 6°→25° →day_k · 25°→55° →noon_k
+  # Fase SERALE   (sun.rising=false): >55° noon_k · 55°→25° →day_k · 25°→6° →evening_k · 6°→−6° →night_k
   active_color_temp: >-
     {%- set day_k   = day_color_temp_kelvin   | int(4000) -%}
     {%- set night_k = night_color_temp_kelvin | int(2700) -%}
     {%- if not (enable_circadian_color_temp | bool(false)) -%}
       {{ night_k if is_night | bool else day_k }}
     {%- else -%}
-      {#
-        Curva circadiana multi-fase con fasi mattina/sera distinte.
-        morning_k / evening_k: temperature target nelle rispettive fasi (0 = usa day_k).
-        noon_k: picco facoltativo a mezzogiorno (0 = rimane a day_k).
-        Smoothstep cubico: s(t) = t² × (3 − 2t)   [curva S, derivate continue in 0 e 1]
-
-        Esempio con night_k=2700K, morning_k=3500K, day_k=4000K, evening_k=3000K, noon_k=5500K:
-          Mattina:   −6°→2700K  0°→~2895K  6°→3500K  15°→3750K  25°→4000K  55°→5500K
-          Sera:      55°→5500K  25°→4000K  15°→3500K   6°→3000K   0°→~2850K  −6°→2700K
-      #}
       {%- set morning_k_raw = morning_color_temp_kelvin | int(0) -%}
       {%- set morning_k = morning_k_raw if morning_k_raw > 0 else day_k -%}
       {%- set evening_k_raw = evening_color_temp_kelvin | int(0) -%}
@@ -949,24 +909,19 @@ variables:
       {%- set e_day   = 25.0 -%}
       {%- set e_noon  = 55.0 -%}
       {%- if elev <= e_night -%}
-        {# Piena notte: costante a night_k #}
         {{ night_k }}
       {%- elif sun_rising -%}
-        {# ── FASE MATTUTINA: sole in salita ── #}
         {%- if elev <= e_gold -%}
-          {# Alba / ora d'oro: night_k → morning_k  (−6° → 6°) #}
           {%- set t = (elev - e_night) / (e_gold - e_night) -%}
           {%- set t = [0.0, [1.0, t] | min] | max -%}
           {%- set s = t * t * (3.0 - 2.0 * t) -%}
           {{ (night_k + (morning_k - night_k) * s) | round | int }}
         {%- elif elev <= e_day -%}
-          {# Mattina: morning_k → day_k  (6° → 25°) #}
           {%- set t = (elev - e_gold) / (e_day - e_gold) -%}
           {%- set t = [0.0, [1.0, t] | min] | max -%}
           {%- set s = t * t * (3.0 - 2.0 * t) -%}
           {{ (morning_k + (day_k - morning_k) * s) | round | int }}
         {%- elif noon_k > day_k and elev <= e_noon -%}
-          {# Picco mezzogiorno (opzionale): day_k → noon_k  (25° → 55°) #}
           {%- set t = (elev - e_day) / (e_noon - e_day) -%}
           {%- set t = [0.0, [1.0, t] | min] | max -%}
           {%- set s = t * t * (3.0 - 2.0 * t) -%}
@@ -977,24 +932,19 @@ variables:
           {{ day_k }}
         {%- endif -%}
       {%- else -%}
-        {# ── FASE SERALE: sole in discesa ── #}
         {%- if elev > e_noon -%}
-          {# Oltre il picco: costante a noon_k (o day_k se noon non configurato) #}
           {{ noon_k }}
         {%- elif elev > e_day -%}
-          {# Pomeriggio: noon_k → day_k  (55° → 25°) #}
           {%- set t = (elev - e_day) / (e_noon - e_day) -%}
           {%- set t = [0.0, [1.0, t] | min] | max -%}
           {%- set s = t * t * (3.0 - 2.0 * t) -%}
           {{ (day_k + (noon_k - day_k) * s) | round | int }}
         {%- elif elev > e_gold -%}
-          {# Tardo pomeriggio / sera: day_k → evening_k  (25° → 6°) #}
           {%- set t = (elev - e_gold) / (e_day - e_gold) -%}
           {%- set t = [0.0, [1.0, t] | min] | max -%}
           {%- set s = t * t * (3.0 - 2.0 * t) -%}
           {{ (evening_k + (day_k - evening_k) * s) | round | int }}
         {%- else -%}
-          {# Ora d'oro serale / tramonto: evening_k → night_k  (6° → −6°) #}
           {%- set t = (elev - e_night) / (e_gold - e_night) -%}
           {%- set t = [0.0, [1.0, t] | min] | max -%}
           {%- set s = t * t * (3.0 - 2.0 * t) -%}
@@ -1011,14 +961,17 @@ variables:
 
 action:
   - choose:
-      # 1) Rilevamento presenza (movimento ON, da sensore 1 o 2) -> logica accensione
-      # Nota: enough_time_since_last_run NON è usato qui perché con mode: restart, quando
-      # il trigger motion_on interrompe un countdown motion_off, last_triggered viene
-      # aggiornato a "adesso" da HA prima che l'action inizi, causando un falso blocco.
-      # Il debounce del trigger (for: motion_on_debounce_seconds) è sufficiente per filtrare i glitch PIR.
+      # ═══════════════════════════════════════════════════════════════════
+      # 1) ACCENSIONE — da movimento (sensore 1/2) OPPURE da calo lux con presenza.
+      #    I due casi condividono la stessa sequenza di accensione; differiscono solo
+      #    nelle condizioni che li abilitano (unificate qui sotto per evitare duplicazione).
+      #
+      #    Nota: enough_time_since_last_run è richiesto SOLO per il trigger lux. Per il
+      #    movimento NON è usato: con mode: restart, quando motion_on interrompe un countdown
+      #    motion_off, last_triggered viene aggiornato a "adesso" da HA prima dell'action,
+      #    causando un falso blocco. Il debounce del trigger filtra già i glitch PIR.
+      # ═══════════════════════════════════════════════════════════════════
       - conditions:
-          - condition: template
-            value_template: "{{ trigger.id in ['motion_on', 'motion_on_2'] }}"
           - condition: template
             value_template: "{{ automation_enabled }}"
           - condition: template
@@ -1029,8 +982,19 @@ action:
                  expand(light_target.entity_id) | selectattr('state', 'eq', 'on') | list | count == 0 }}
           - condition: template
             value_template: >-
-              {{ (not enable_lux_check) or ((current_lux | float(999999)) < (active_lux_threshold | float(0))) }}
+              {{
+                (trigger.id in ['motion_on', 'motion_on_2']
+                   and ((not enable_lux_check) or ((current_lux | float(999999)) < (active_lux_threshold | float(0)))))
+                or
+                (trigger.id == 'lux_below_threshold'
+                   and enable_lux_trigger and enable_lux_check
+                   and (is_state(presence_sensor, 'on')
+                        or (has_presence_sensor_2 | bool(false) and is_state(presence_sensor_2, 'on')))
+                   and enough_time_since_last_run
+                   and ((current_lux | float(999999)) < (active_lux_threshold | float(0))))
+              }}
         sequence:
+          # Accensione: scena, oppure luminosità (+ temperatura colore se abilitata).
           - choose:
               - conditions:
                   - condition: template
@@ -1063,9 +1027,9 @@ action:
                       transition: "{{ active_transition | int(0) }}"
           # Aggiornamento circadiano periodico: loop attivo mentre la luce è accesa.
           # Ogni N minuti ri-calcola la temperatura colore con l'elevazione solare corrente
-          # e la invia alla luce con una transizione = intervallo (continuità perfetta).
-          # Con mode=restart il loop viene interrotto automaticamente dal trigger motion_off,
-          # che gestisce il countdown di spegnimento senza interferenze.
+          # e la invia con una transizione = intervallo (continuità perfetta).
+          # Con mode=restart il loop viene interrotto dal trigger motion_off, che gestisce
+          # il countdown di spegnimento senza interferenze.
           - choose:
               - conditions:
                   - condition: template
@@ -1150,156 +1114,11 @@ action:
                               {%- endif -%}
                             transition: "{{ (circadian_update_interval_minutes | int(5)) * 60 }}"
 
-      # 2) Trigger calo lux + presenza rilevata -> accensione automatica al crepuscolo
-      # Si attiva quando la luce esterna scende sotto soglia giorno e qualcuno è già in stanza.
-      # Permette alle luci di accendersi automaticamente al tramonto o quando arrivano le nuvole
-      # senza attendere un nuovo movimento del sensore PIR.
-      - conditions:
-          - condition: template
-            value_template: "{{ trigger.id == 'lux_below_threshold' }}"
-          - condition: template
-            value_template: "{{ automation_enabled }}"
-          - condition: template
-            value_template: "{{ enable_lux_trigger }}"
-          - condition: template
-            value_template: "{{ enable_lux_check }}"
-          - condition: template
-            value_template: "{{ not override_active }}"
-          - condition: template
-            value_template: >-
-              {{ is_state(presence_sensor, 'on') or
-                 (has_presence_sensor_2 | bool(false) and is_state(presence_sensor_2, 'on')) }}
-          - condition: template
-            value_template: "{{ enough_time_since_last_run }}"
-          - condition: template
-            value_template: >-
-              {{ (not skip_if_light_already_on) or
-                 expand(light_target.entity_id) | selectattr('state', 'eq', 'on') | list | count == 0 }}
-          # Il trigger è già sotto day_lux_threshold; verifica anche active_lux_threshold
-          # (potrebbe differire in profilo notte se night_lux_threshold < day_lux_threshold)
-          - condition: template
-            value_template: >-
-              {{ (current_lux | float(999999)) < (active_lux_threshold | float(0)) }}
-        sequence:
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: "{{ brightness_mode == 'scene_control' }}"
-                  - condition: template
-                    value_template: >-
-                      {{ (is_night | bool and (night_scene | string | length > 0))
-                         or ((not (is_night | bool)) and (day_scene | string | length > 0)) }}
-                sequence:
-                  - service: scene.turn_on
-                    target:
-                      entity_id: "{{ night_scene if is_night | bool else day_scene }}"
-            default:
-              - choose:
-                  - conditions:
-                      - condition: template
-                        value_template: "{{ enable_color_temp | bool }}"
-                    sequence:
-                      - service: light.turn_on
-                        target: !input light_target
-                        data:
-                          brightness_pct: "{{ active_brightness | int(100) }}"
-                          transition: "{{ active_color_transition | int(0) }}"
-                          color_temp_kelvin: "{{ active_color_temp | int(4000) }}"
-                default:
-                  - service: light.turn_on
-                    target: !input light_target
-                    data:
-                      brightness_pct: "{{ active_brightness | int(100) }}"
-                      transition: "{{ active_transition | int(0) }}"
-          # Aggiornamento circadiano periodico: stesso loop del branch motion_on.
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: >-
-                      {{ (brightness_mode != 'scene_control')
-                         and (enable_color_temp | bool(false))
-                         and (enable_circadian_color_temp | bool(false))
-                         and (enable_circadian_periodic_update | bool(false)) }}
-                sequence:
-                  - repeat:
-                      while:
-                        - condition: template
-                          value_template: >-
-                            {{ expand(light_target.entity_id) | selectattr('state', 'eq', 'on') | list | count > 0 }}
-                      sequence:
-                        - delay:
-                            minutes: "{{ circadian_update_interval_minutes | int(5) }}"
-                        - condition: template
-                          value_template: >-
-                            {{ expand(light_target.entity_id) | selectattr('state', 'eq', 'on') | list | count > 0
-                               and not ((manual_override_helper | string | length > 0) and is_state(manual_override_helper, 'on')) }}
-                        - service: light.turn_on
-                          target: !input light_target
-                          data:
-                            color_temp_kelvin: >-
-                              {%- set day_k   = day_color_temp_kelvin   | int(4000) -%}
-                              {%- set night_k = night_color_temp_kelvin | int(2700) -%}
-                              {%- set morning_k_raw = morning_color_temp_kelvin | int(0) -%}
-                              {%- set morning_k = morning_k_raw if morning_k_raw > 0 else day_k -%}
-                              {%- set evening_k_raw = evening_color_temp_kelvin | int(0) -%}
-                              {%- set evening_k = evening_k_raw if evening_k_raw > 0 else day_k -%}
-                              {%- set elev = states(solar_elevation_entity) | float(0) -%}
-                              {%- set noon_k_raw = noon_color_temp_kelvin | int(0) -%}
-                              {%- set noon_k = noon_k_raw if noon_k_raw > day_k else day_k -%}
-                              {%- set sun_rising = state_attr('sun.sun', 'rising') | bool(true) -%}
-                              {%- set e_night = -6.0 -%}
-                              {%- set e_gold  =  6.0 -%}
-                              {%- set e_day   = 25.0 -%}
-                              {%- set e_noon  = 55.0 -%}
-                              {%- if elev <= e_night -%}
-                                {{ night_k }}
-                              {%- elif sun_rising -%}
-                                {%- if elev <= e_gold -%}
-                                  {%- set t = (elev - e_night) / (e_gold - e_night) -%}
-                                  {%- set t = [0.0, [1.0, t] | min] | max -%}
-                                  {%- set s = t * t * (3.0 - 2.0 * t) -%}
-                                  {{ (night_k + (morning_k - night_k) * s) | round | int }}
-                                {%- elif elev <= e_day -%}
-                                  {%- set t = (elev - e_gold) / (e_day - e_gold) -%}
-                                  {%- set t = [0.0, [1.0, t] | min] | max -%}
-                                  {%- set s = t * t * (3.0 - 2.0 * t) -%}
-                                  {{ (morning_k + (day_k - morning_k) * s) | round | int }}
-                                {%- elif noon_k > day_k and elev <= e_noon -%}
-                                  {%- set t = (elev - e_day) / (e_noon - e_day) -%}
-                                  {%- set t = [0.0, [1.0, t] | min] | max -%}
-                                  {%- set s = t * t * (3.0 - 2.0 * t) -%}
-                                  {{ (day_k + (noon_k - day_k) * s) | round | int }}
-                                {%- elif noon_k > day_k -%}
-                                  {{ noon_k }}
-                                {%- else -%}
-                                  {{ day_k }}
-                                {%- endif -%}
-                              {%- else -%}
-                                {%- if elev > e_noon -%}
-                                  {{ noon_k }}
-                                {%- elif elev > e_day -%}
-                                  {%- set t = (elev - e_day) / (e_noon - e_day) -%}
-                                  {%- set t = [0.0, [1.0, t] | min] | max -%}
-                                  {%- set s = t * t * (3.0 - 2.0 * t) -%}
-                                  {{ (day_k + (noon_k - day_k) * s) | round | int }}
-                                {%- elif elev > e_gold -%}
-                                  {%- set t = (elev - e_gold) / (e_day - e_gold) -%}
-                                  {%- set t = [0.0, [1.0, t] | min] | max -%}
-                                  {%- set s = t * t * (3.0 - 2.0 * t) -%}
-                                  {{ (evening_k + (day_k - evening_k) * s) | round | int }}
-                                {%- else -%}
-                                  {%- set t = (elev - e_night) / (e_gold - e_night) -%}
-                                  {%- set t = [0.0, [1.0, t] | min] | max -%}
-                                  {%- set s = t * t * (3.0 - 2.0 * t) -%}
-                                  {{ (night_k + (evening_k - night_k) * s) | round | int }}
-                                {%- endif -%}
-                              {%- endif -%}
-                            transition: "{{ (circadian_update_interval_minutes | int(5)) * 60 }}"
-
-      # 3) Trigger calo lux con ASSENZA rilevata -> spegnimento di sicurezza
-      # Si attiva solo se enable_lux_trigger=true (il trigger lux è abilitato).
-      # Gestisce il caso: lux scende con stanza vuota (nessun countdown motion_off in corso).
-      # Open space: si attiva solo se ENTRAMBI i sensori sono liberi (nessuna presenza).
+      # ═══════════════════════════════════════════════════════════════════
+      # 2) Trigger calo lux con ASSENZA rilevata -> spegnimento di sicurezza.
+      #    Gestisce il caso: lux scende con stanza vuota (nessun countdown motion_off in corso).
+      #    Open space: solo se ENTRAMBI i sensori sono liberi.
+      # ═══════════════════════════════════════════════════════════════════
       - conditions:
           - condition: template
             value_template: "{{ trigger.id == 'lux_below_threshold' }}"
@@ -1311,13 +1130,11 @@ action:
                  (not (has_presence_sensor_2 | bool(false)) or is_state(presence_sensor_2, 'off')) }}
         sequence:
           # Brevissima attesa di stabilizzazione (5s) prima di spegnere.
-          # NOTA: non usare delay lungo (es. 60s) perché con mode=restart un altro trigger lux
-          # durante l'attesa riavvia il caso 3 da capo, creando un loop infinito che impedisce
-          # lo spegnimento. Il debounce reale è già garantito da lux_trigger_stability_seconds
-          # a livello di trigger. Questi 5s sono solo per sicurezza sensore.
+          # NOTA: non usare delay lungo: con mode=restart un altro trigger lux durante l'attesa
+          # riavvia questo caso da capo, creando un loop infinito che impedisce lo spegnimento.
+          # Il debounce reale è già garantito da lux_trigger_stability_seconds a livello di trigger.
           - delay:
               seconds: 5
-          # Ricontrolla assenza e override prima di spegnere (entrambi i sensori devono essere liberi)
           - condition: template
             value_template: >-
               {{ is_state(presence_sensor, 'off') and
@@ -1331,8 +1148,10 @@ action:
             data:
               transition: "{{ off_transition_seconds | int(0) }}"
 
-      # 4) Rilevamento assenza (movimento OFF, da sensore 1 o 2) -> logica spegnimento (mai legata ai lux)
-      # Open space: lo spegnimento avviene solo se entrambi i sensori di movimento sono liberi dopo il timeout.
+      # ═══════════════════════════════════════════════════════════════════
+      # 3) SPEGNIMENTO — assenza movimento (sensore 1/2), mai legato ai lux.
+      #    Open space: spegne solo se entrambi i sensori di movimento sono liberi dopo il timeout.
+      # ═══════════════════════════════════════════════════════════════════
       - conditions:
           - condition: template
             value_template: "{{ trigger.id in ['motion_off', 'motion_off_2'] }}"
@@ -1344,10 +1163,8 @@ action:
         sequence:
           - delay:
               seconds: "{{ active_timeout | int(0) }}"
-          # Se uno o entrambi i sensori mmWave rilevano presenza, attendi che si liberino tutti.
-          # Logica OR: basta che uno dei due mmWave sia attivo per mantenere la luce accesa.
-          # Logica AND: entrambi devono essere liberi prima di procedere allo spegnimento.
-          # Se enable_mmwave_timeout è attivo, applica un timeout massimo di sicurezza anti-blocco.
+          # mmWave: OR per mantenere accesa (basta uno attivo), AND per spegnere (entrambi liberi).
+          # Se enable_mmwave_timeout è attivo, applica un timeout massimo anti-blocco.
           - choose:
               - conditions:
                   - condition: template
@@ -1370,7 +1187,7 @@ action:
                       - wait_template: >-
                           {{ (not has_mmwave or is_state(mmwave_sensor, 'off')) and
                              (not has_mmwave_2 or is_state(mmwave_sensor_2, 'off')) }}
-          # Open space: verifica che ENTRAMBI i sensori siano liberi prima di procedere allo spegnimento
+          # Open space: verifica che ENTRAMBI i sensori siano liberi prima di procedere.
           - condition: template
             value_template: >-
               {{ is_state(presence_sensor, 'off') and
@@ -1379,9 +1196,8 @@ action:
             value_template: >-
               {{ (not ((manual_override_helper | string | length > 0) and is_state(manual_override_helper, 'on')))
                  or keep_auto_off_during_override }}
-          # Pre-spegnimento con dissolvenza (opzionale): abbassa la luce come avviso visivo
-          # prima dello spegnimento definitivo. Se durante il dimming torna il movimento,
-          # l'automazione si riavvia (mode=restart) e le luci tornano alla piena intensità.
+          # Pre-spegnimento con dissolvenza (opzionale): avviso visivo prima dello spegnimento.
+          # Se torna il movimento durante il dimming, mode=restart riporta le luci piene.
           - choose:
               - conditions:
                   - condition: template
@@ -1394,13 +1210,12 @@ action:
                       transition: "{{ off_transition_seconds | int(0) }}"
                   - delay:
                       seconds: "{{ pre_off_dim_duration_seconds | int(15) }}"
-                  # Ricontrolla assenza di ENTRAMBI i sensori dopo la fase di avviso
                   - condition: template
                     value_template: >-
                       {{ is_state(presence_sensor, 'off') and
                          (not (has_presence_sensor_2 | bool(false)) or is_state(presence_sensor_2, 'off')) }}
-          # Ricontrolla mmWave dopo il pre-spegnimento: se uno dei sensori è diventato attivo durante il dimming
-          # (senza che il sensore di movimento si sia riattivato), attende che entrambi si liberino prima di spegnere.
+          # Ricontrolla mmWave dopo il pre-spegnimento: se un radar si è riattivato durante il dimming,
+          # attende di nuovo che entrambi si liberino prima di spegnere.
           - choose:
               - conditions:
                   - condition: template

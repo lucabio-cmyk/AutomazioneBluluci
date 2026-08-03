@@ -25,6 +25,52 @@ Usa sempre `raw.githubusercontent.com`.
 
 ---
 
+## Configurazione (organizzata in sezioni)
+
+Per ridurre la confusione, i parametri sono raggruppati in **sezioni collassabili**.
+All'apertura vedi solo i **3 essenziali**; il resto è nascosto finché non ti serve:
+
+| In vista subito | Sezioni collassabili (aprile solo se ti servono) |
+|---|---|
+| Sensore di movimento · Sensore lux · Luci target | 🛰️ Sensori aggiuntivi · ⚙️ Comportamento generale · 🌗 Giorno/Notte · 💡 Accensione & Luminosità · 🌙 Spegnimento · 🎨 Temperatura colore · 🎬 Modalità scene |
+
+**Setup minimo per partire:** imposta i 3 essenziali e lascia tutto il resto ai valori di default.
+Le luci si accendono al movimento (se il lux è sotto soglia) e si spengono dopo il timeout di assenza.
+
+---
+
+## Troubleshooting
+
+### Le luci NON si accendono quando dovrebbero
+1. **Controllo lux troppo restrittivo.** Con "Abilita controllo lux in accensione" attivo, la luce
+   si accende solo se `lux < soglia`. In sezione **💡 Accensione**, alza `Soglia lux giorno` (o
+   `Soglia lux notte`) — se è più bassa del lux reale in stanza, la luce non parte mai.
+2. **Sensore lux "unavailable".** Se il tuo sensore va spesso offline, il valore di fallback
+   `Lux fallback` (default 999) blocca l'accensione. Se ti capita, **abbassalo** sotto la soglia
+   giorno (es. 0) così un sensore assente non impedisce l'accensione.
+3. **Profilo notte inatteso.** Se `is_night` risulta vero quando non te lo aspetti (es. lux_based
+   con soglia notte troppo alta), viene usata la `Soglia lux notte`, di solito più bassa. Verifica
+   la modalità di rilevamento notte in **🌗 Giorno/Notte**.
+4. **Debounce movimento.** Con `Debounce movimento ON` > 0, il PIR deve restare ON per quel tempo:
+   con sensori a impulso breve il trigger può non scattare mai. Tienilo a 0 salvo necessità.
+
+### Le luci RESTANO accese / non si spengono
+1. **mmWave "incollato" su ON.** I radar (LD2410 & simili) danno spesso falsi positivi: finché
+   rilevano "presenza" la luce resta accesa. Assicurati che **"Abilita timeout massimo mmWave"**
+   sia attivo (sezione 🛰️) — senza timeout la luce resta accesa a tempo indeterminato.
+2. **Timeout di assenza troppo lungo.** In **🌙 Spegnimento**, `Timeout assenza giorno/notte`
+   è il tempo dopo l'ultimo movimento prima di spegnere. Abbassalo se lo spegnimento tarda.
+3. **Movimento sempre rilevato.** Se il PIR resta ON (riflessi, tende in movimento, animali),
+   il countdown di spegnimento non parte mai. Verifica lo storico del `binary_sensor`.
+4. **Secondo sensore open space.** Con due sensori di movimento lo spegnimento richiede che
+   **entrambi** siano liberi (logica AND). Se uno resta ON, la luce non si spegne.
+
+### Troppe opzioni
+Ignora le sezioni collassate: servono solo per le funzioni avanzate (circadiano, adattivo,
+pre-spegnimento, scene). Con i soli 3 parametri essenziali il blueprint funziona già.
+
+---
+
 ## Funzionalità principali
 
 ### Sensori supportati
