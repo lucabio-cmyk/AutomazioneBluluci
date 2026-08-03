@@ -500,6 +500,48 @@ blueprint:
               mode: slider
               unit_of_measurement: s
 
+        enable_lux_off:
+          name: Spegni quando c'è abbastanza luce naturale
+          description: >-
+            Se attivo, quando il sensore lux sale sopra la "Soglia lux spegnimento" per il tempo
+            di stabilità configurato, le luci si spengono ANCHE se c'è presenza (risparmio
+            energetico: c'è già abbastanza luce diurna).
+            IMPORTANTE: imposta la "Soglia lux spegnimento" >= "Soglia lux giorno" per evitare
+            che la luce si accenda e spenga in continuazione (serve una banda di isteresi tra
+            la soglia che accende e quella che spegne). Se hai attivo anche il trigger di calo
+            lux, quando poi torna il buio e sei in stanza le luci si riaccendono da sole.
+          default: false
+          selector:
+            boolean: {}
+
+        lux_off_threshold:
+          name: Soglia lux spegnimento
+          description: >-
+            Sopra questo valore di lux (stabile per il tempo sotto) le luci si spengono.
+            Impostala su un livello di piena luce diurna e >= "Soglia lux giorno".
+          default: 250
+          selector:
+            number:
+              min: 0
+              max: 5000
+              step: 1
+              mode: slider
+              unit_of_measurement: lx
+
+        lux_off_stability_seconds:
+          name: Stabilità lux prima dello spegnimento (s)
+          description: >-
+            Il lux deve restare sopra la soglia per almeno questo tempo prima di spegnere.
+            Evita spegnimenti per lampi di luce momentanei. Consigliato 60-180 s.
+          default: 120
+          selector:
+            number:
+              min: 5
+              max: 900
+              step: 5
+              mode: slider
+              unit_of_measurement: s
+
     # ─────────────────────────────────────────────────────────────
     # TEMPERATURA COLORE (bianco)
     # ─────────────────────────────────────────────────────────────
@@ -720,6 +762,16 @@ trigger:
     for:
       seconds: !input lux_trigger_stability_seconds
 
+  # Trigger salita lux: si attiva solo se enable_lux_off è abilitato.
+  # Spegne le luci quando c'è abbastanza luce naturale, anche in presenza.
+  - platform: numeric_state
+    id: lux_above_threshold
+    enabled: !input enable_lux_off
+    entity_id: !input lux_sensor
+    above: !input lux_off_threshold
+    for:
+      seconds: !input lux_off_stability_seconds
+
 variables:
   presence_sensor: !input presence_sensor
   presence_sensor_2: !input presence_sensor_2
@@ -775,6 +827,9 @@ variables:
   pre_off_dim_brightness_pct: !input pre_off_dim_brightness_pct
   pre_off_dim_duration_seconds: !input pre_off_dim_duration_seconds
   off_transition_seconds: !input off_transition_seconds
+  enable_lux_off: !input enable_lux_off
+  lux_off_threshold: !input lux_off_threshold
+  lux_off_stability_seconds: !input lux_off_stability_seconds
 
   # Stato override manuale robusto (helper opzionale)
   # NOTA: espressione singola {{ }} per restituire un boolean nativo (non una stringa).
@@ -1239,6 +1294,33 @@ action:
                           {{ (not has_mmwave or is_state(mmwave_sensor, 'off')) and
                              (not has_mmwave_2 or is_state(mmwave_sensor_2, 'off')) }}
           # Spegnimento definitivo con transizione morbida
+          - service: light.turn_off
+            target: !input light_target
+            data:
+              transition: "{{ off_transition_seconds | int(0) }}"
+
+      # ═══════════════════════════════════════════════════════════════════
+      # 4) SPEGNIMENTO per luce naturale sufficiente (opzionale).
+      #    Quando il lux sale sopra lux_off_threshold, spegne le luci ANCHE in presenza:
+      #    di giorno c'è già abbastanza luce, quindi si risparmia energia. Se poi torna
+      #    il buio ed enable_lux_trigger è attivo, le luci si riaccendono da sole.
+      # ═══════════════════════════════════════════════════════════════════
+      - conditions:
+          - condition: template
+            value_template: "{{ trigger.id == 'lux_above_threshold' }}"
+          - condition: template
+            value_template: "{{ automation_enabled }}"
+          - condition: template
+            value_template: "{{ enable_lux_off }}"
+          - condition: template
+            value_template: >-
+              {{ (not ((manual_override_helper | string | length > 0) and is_state(manual_override_helper, 'on')))
+                 or keep_auto_off_during_override }}
+          # Riconferma che il lux è davvero ancora sopra la soglia al momento dell'azione.
+          - condition: template
+            value_template: >-
+              {{ (current_lux | float(0)) >= (lux_off_threshold | float(999999)) }}
+        sequence:
           - service: light.turn_off
             target: !input light_target
             data:

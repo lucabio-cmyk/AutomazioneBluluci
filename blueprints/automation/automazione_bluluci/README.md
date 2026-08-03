@@ -39,6 +39,25 @@ Le luci si accendono al movimento (se il lux è sotto soglia) e si spengono dopo
 
 ---
 
+## Spegnimento quando c'è abbastanza luce naturale
+
+Con **"Spegni quando c'è abbastanza luce naturale"** attivo (sezione 🌙 Spegnimento):
+
+- Quando il sensore lux **sale sopra** la `Soglia lux spegnimento` per il tempo di stabilità
+  configurato, le luci si spengono **anche se c'è presenza** — di giorno c'è già abbastanza
+  luce diurna, quindi si risparmia energia.
+- Se poi torna il buio e sei in stanza, con `Abilita accensione automatica al calo di lux`
+  attivo le luci si **riaccendono da sole**.
+
+> ⚠️ **Isteresi obbligatoria.** Imposta `Soglia lux spegnimento` **≥** `Soglia lux giorno`.
+> Serve una banda morta tra la soglia che accende e quella che spegne, altrimenti le luci
+> oscillano on/off. Esempio sicuro: giorno = 155 lx, spegnimento = 250 lx.
+
+Questo sostituisce automazioni esterne tipo "spegni la sala se c'è il sole": gestisci la luce
+in un solo posto, evitando che due automazioni si contendano la stessa lampada.
+
+---
+
 ## Troubleshooting
 
 ### Le luci NON si accendono quando dovrebbero
